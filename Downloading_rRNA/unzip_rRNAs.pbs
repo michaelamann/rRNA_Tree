@@ -1,0 +1,19 @@
+#!/bin/bash
+
+#PBS -q default
+#PBS -l nodes=1:ppn=8
+#PBS -l walltime=1:00:00
+#PBS -N x_unzip_all_files
+#PBS -m ae
+#PBS -M mimann@unm.edu
+
+
+module load parallel-20170322-gcc-4.8.5-2ycpx7e
+
+source $(which env_parallel.bash)
+
+src=$PBS_O_WORKDIR
+
+ls *gz |  cat > all_files.txt
+cat $src/all_files.txt | env_parallel --sshloginfile $PBS_NODEFILE 'gunzip {}'
+

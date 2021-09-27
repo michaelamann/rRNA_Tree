@@ -1,0 +1,70 @@
+---
+title: "Download_Process_rRNA_labeled"
+author: "Michael Mann"
+date: "9/20/2021"
+output: html_document
+---
+Some of the genomes already include the rRNA genes. So I will download those files, process them and then 
+```{r setup}
+library(tidyverse)
+library(microseq)
+```
+
+Running this on CARC at 
+/users/mimann/wheeler-scratch/genomes/raw_genomes
+to download the genomes.
+rRNA_download_script.pbs
+```{bash download asco rrna seqs}
+#!/bin/bash
+
+#PBS -q default
+#PBS -l nodes=1:ppn=8
+#PBS -l walltime=1:00:00
+#PBS -N x_rRNA_downloads
+#PBS -m ae
+#PBS -M mimann@unm.edu
+
+
+module load parallel-20170322-gcc-4.8.5-2ycpx7e
+
+source $(which env_parallel.bash)
+
+src=$PBS_O_WORKDIR
+# exports to fna_files folder
+cat $src/asco_genomes.txt $src/asco_rna_from_genomes.txt $src/basidio_rrna_genomes.txt| env_parallel --sshloginfile $PBS_NODEFILE 'wget {} -P $src/fna_files --no-verbose'
+
+
+```
+
+I did unzip it at first but there is no need to.
+
+Wrote an R script to run in parallel on CARC. Cleaned up and only kept rRNA sequences. 
+Creates tibble and stores it in the rna_annotations_genomes.rds object.
+```{bash clean up r}
+#!/bin/bash
+
+#PBS -q default
+#PBS -l nodes=1:ppn=8
+#PBS -l walltime=4:00:00
+#PBS -N x_filter_using_R
+#PBS -m ae
+#PBS -M mimann@unm.edu
+
+
+module load r-4.0.4-gcc-10.2.0-python3-dghog6f
+
+cd $PBS_O_WORKDIR
+
+# simple script to pull out the relevant rRNA genes. 
+# this is all done on CARC because my computer has no storage and CARC can run in parallel!
+Rscript Filter_rna_genome_files.R
+
+```
+
+
+```{r read in rds}
+# NAs mean the genome lacked any rRNA seqs
+rRNA_annotations <- read_rds("Downloading_rRNA/rna_annotations_genomes.rds")
+
+```
+

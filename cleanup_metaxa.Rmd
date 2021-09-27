@@ -1,0 +1,506 @@
+---
+title: "Summarizing metaxa"
+author: "Michael Mann"
+date: "7/9/2021"
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(microseq)
+```
+
+
+```{r reading in all data}
+
+ # name = genome name
+ # SSU = SSU results
+ # LSU = LSU results
+  
+# compiles all the results into a tibble. 
+  #1. fasta with all extracted sequences
+  #2. full extraction results
+  #3. taxonomy results
+  
+extract_results <- function(path){
+  name <- 
+        str_replace(
+              string = list.files(path = path)[1], #pull out first file from folder
+              pattern = "_genomic.*",     # remove ending 
+              replacement = "")  %>%
+        str_sub(start = 5) # remove SSU_ and LSU_
+    
+    
+# If it failed, then it prints that
+failed <-
+  sum(str_detect(string = list.files(path = path), pattern = "metaxa_temp_directory"))  > 0 
+   
+
+if (failed == TRUE){
+  
+  output <- 
+  list(genome = name,
+       SSU = NA, 
+       LSU = NA)
+  
+}else { 
+  
+# compiles all the results into a tibble. 
+  #1. fasta with all extracted sequences
+  #2. full extraction results
+  #3. taxonomy results
+region_creator <- function(region){
+  options(readr.num_columns = 0)
+  
+ # making sure fasta file has data in it
+ size <- file.size(paste0(path, "/", region, "_", name, "_genomic.extraction.fasta"))
+  
+ if (size > 0){
+     regions_done <-  
+       list(Fasta = 
+                readFasta(in.file = paste0(path, "/", region, "_", name, "_genomic.extraction.fasta")
+                          ),
+            
+                Extraction_Results = 
+                  read_tsv(file = paste0(path, "/", region, "_", name, "_genomic.extraction.results"), 
+                          col_names = c("ID", "Length", "Origin", "Strand", "Domains", 
+                                        "Avg_E", "Avg_Score", "Unknown_Field", "Start", "End", 
+                                        "First_Domain", "Last_Domain", "Chimera",
+                                        "Specific_Origin_Info", "Specific_Origin_Info_E_vals"), 
+                          ), 
+       
+                Taxonomy = 
+                  read_tsv(file = paste0(path, "/", region, "_",name, "_genomic.taxonomy.txt"), 
+                           col_names = c("ID", "Classification","Identity", "Length", 
+                                         "Reliability_Score")
+                           )
+                  
+        )
+ } else {
+   
+   regions_done <- "Missing"
+   
+ }
+ regions_done
+}
+  
+# creates ouput list 
+output <- 
+  list(genome = name,
+       SSU = region_creator("SSU"), 
+       LSU = region_creator("LSU"))
+} 
+
+output
+}
+
+
+folder_paths <- 
+  c(list.files("metaxa_output/basidio", pattern = "output", full.names = T),
+  list.files("metaxa_output/asco", pattern = "output", full.names = T))
+
+summary_table <-
+  tibble(directory = folder_paths) %>%
+  mutate(compiled = map(directory, .f = extract_results)) %>%
+  unnest_wider(compiled) %>%
+  mutate(summary =case_when(SSU == "Missing" & LSU == "Missing" ~ "Both Missing", 
+                             is.na(SSU) == TRUE & is.na(LSU) == TRUE ~ "Both Failed", 
+                             is.na(SSU) == TRUE & LSU == "Missing" ~ "SSU Failed and LSU Missing",
+                             SSU == "Missing" & is.na(LSU) == TRUE ~ "SSU Missing and LSU Failed", 
+                             SSU == "Missing" & is.list(LSU) == TRUE ~ "SSU Missing and LSU Extracted", 
+                             is.list(SSU) == TRUE & LSU == "Missing" ~ "SSU Extracted and LSU Missing", 
+                             is.list(SSU) == TRUE & is.list(LSU) == TRUE ~ "Both Extracted", 
+                             TRUE ~ "Other"))
+
+
+summary_table %>%
+  group_by(summary) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(percent = 100*n/sum(n))
+
+
+
+potential_SSU <- 
+  summary_table %>%
+  select(-LSU) %>%
+  filter(summary == "Both Extracted") 
+
+
+
+
+```
+
+
+
+
+
+
+
+```{r process}
+# bring in taxonomy data for genomes
+meta_data <- read_csv("genomes_metadata.csv")
+
+
+# region cleaner merges the fasta and all data on the hits into one dataframe
+# it also cleans it up with these conditions:
+# 1. must be identified as "Fungi"
+# 2. Origin must be "E" for eukaryote or "A" for all
+# creates "None_left" if all the reads are removed
+# create a function that merges three dataframes into 1. 
+# allows merging to happen later with SSU and LSU by creating a new column called Region
+# tally regions covered of the rRNA gene
+# TRUE or FALSE if it spans the PacBio primer region
+# and number or regions (E numbers) for PacBio region. 
+# 6 E regions for SSU anad 5 for LSU for PacBio regions
+
+region_cleaner <- function(dat, region = "SSU"){
+  
+  # make sure only the cells with data are cleaned up and the rest pass through
+  
+ if (identical(dat[[1]], NA) == TRUE){
+    output <- dat
+  } else if (identical(dat, "Missing") == TRUE){
+    output <- dat
+  } else {
+    
+    ## first part merges all the hit data and then removes some that are definitely not fungal reads
+    output <-
+      dat$Fasta %>%
+        mutate(ID = str_extract(string = Header, pattern = ".*(?=\\|)")) %>%
+        left_join(dat$Extraction_Results, by = "ID") %>%
+        rename(Extraction_length = Length) %>%
+        left_join(dat$Taxonomy, by = "ID") %>%
+        rename(Taxonomy_length = Length) %>%
+        mutate(Region = region) %>%
+        filter(Origin %in% c("E","A")) %>% # make sure it's eukaryota
+        filter(str_detect(Classification, pattern = "Fungi")) # make sure it's fungi
+
+            # make sure we still have records since we could've lost all the hits for that region + genome
+            if (nrow(output) == 0){
+              
+              output <- "None_Left"
+              
+              
+              
+            # region specific code
+            # if there are records, lets calculate the rRNA coverage and my PacBio primer coverage
+            # I want this to determine which records to use. 
+            # I prefer full rRNA genes but will prioritize fragments that cover my primers
+            
+            } else if (region ==  "SSU"){
+
+            # SSU must cover V7l to V9r aka E10 to E15
+            # SSU region will have "6" regions to cover. Thus if its less than 6, it will be FALSE for Span_PacBio_Primer 
+             
+               output <-
+                output %>%
+                 mutate(Specific_Origin_Info = map(Specific_Origin_Info, 
+                                                   .f = str_split, 
+                                                   pattern = ",", simplify = TRUE)) %>% # need to clean up and make vector
+                mutate(PacBio_region_length = 
+                           map(Specific_Origin_Info, ~ 
+                                 length(intersect(paste("E", 10:15, sep=""), .x) # matching elements and giving the number of hits
+                                      )
+                           )
+                         ) %>% 
+                  mutate(Span_PacBio_Primer = PacBio_region_length == 6)  #must cover all 6 Regions
+        
+                    
+             } else if (region ==  "LSU"){
+               
+              
+              # LSU must cover from D1 to D3 aka C01/E01 to C05/E05. 
+              # SSU region will have "5" regions to cover. Thus if its less than 5, it will be FALSE for Span_PacBio_Primer 
+                   output <-
+                output %>%
+                 mutate(Specific_Origin_Info = map(Specific_Origin_Info, .f = str_split, pattern = ",", simplify = TRUE)) %>%
+                  mutate(PacBio_region_length = 
+                           map(Specific_Origin_Info, ~ 
+                                 length(
+                                   intersect(paste("E", "0", 1:5, sep = ""), .x) # looking for these elements
+                                      )
+                            )
+                         ) %>% 
+                  mutate(Span_PacBio_Primer = PacBio_region_length == 5)
+            }
+  
+  
+  } 
+  output # return the data
+}
+
+# bind rows for SSU and LSU.
+# has conditions to handle missing data
+# the code creates N/A values that messes up binding the rows of the columns. 
+merge_tibbles <- function(SSU, LSU){
+  
+  
+  if (is.data.frame(SSU) == TRUE & is.data.frame(LSU) == TRUE){
+    
+    
+    SSU <- 
+      SSU %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), ~na_if(., "N/A"))) %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), as.numeric))
+    
+    LSU <- 
+      LSU %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), ~na_if(., "N/A"))) %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), as.numeric))
+    
+    
+   output <- 
+      SSU %>%
+      bind_rows(LSU)
+  } else if (is.data.frame(SSU) == FALSE & is.data.frame(LSU) == TRUE) {
+
+    output <- 
+      LSU %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), ~na_if(., "N/A"))) %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), as.numeric))
+  } else if (is.data.frame(SSU) == TRUE & is.data.frame(LSU) == FALSE) {
+    
+    output <- 
+      SSU %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), ~na_if(., "N/A"))) %>%
+      mutate(across(c(Identity, Taxonomy_length, Reliability_Score), as.numeric))
+  } else {
+    output <- NA
+  }
+  
+  output
+}
+
+
+# Figure out warnings and make sure it is properly following conditional statements
+cleaned_SSU_LSU <- 
+  summary_table %>%
+  mutate(Assembly = str_extract(genome, pattern = "GCA_.*\\.[:digit:](?=_)")) %>%
+  left_join(meta_data, by = "Assembly") %>%
+  mutate(SSU_merged  = map(SSU, region_cleaner, region = "SSU"))  %>%
+  mutate(LSU_merged  = map(LSU, region_cleaner, region = "LSU")) %>%
+  mutate(final_merged = map2(SSU_merged, LSU_merged, merge_tibbles)) 
+  
+
+
+# Creating stats for how well the hits match with what we want. 
+
+# match taxonomy with genbank and the hits
+# spans regions
+# Length excluding ambiguous bases
+taxonomy_read_length_stats <- 
+  function(NCBI_Phylum, NCBI_Order, NCBI_Family, NCBI_Genus, final_merged){
+    
+    
+    # need conditional because some are not dataframes and it will break
+    if (is.data.frame(final_merged) == TRUE){
+      output <- 
+        final_merged %>%
+          mutate(Phylum_Match = str_detect(string = Classification, pattern = NCBI_Phylum), 
+                  Order_Match = str_detect(string = Classification, pattern = NCBI_Order), 
+                 Family_Match = str_detect(string = Classification, pattern = NCBI_Family), 
+                  Genus_Match = str_detect(string = Classification, pattern = NCBI_Genus))
+    }
+    
+    else {
+      output <- final_merged
+    }
+    output
+  }
+
+
+
+cleaned_SSU_LSU_stats <- 
+  cleaned_SSU_LSU %>% 
+  mutate(final_merged = pmap(list(NCBI_Phylum, NCBI_Order, NCBI_Family, NCBI_Genus, final_merged), match_taxonomy)) 
+
+### ITSx_contigs
+# running all contigs through it
+# creating a list of all the contigs used. 
+
+contig_df <- 
+  cleaned_SSU_LSU_stats %>%
+  select(-SSU, -LSU, SSU_merged, -LSU_merged) %>%
+  select(directory:Blast_Tax, final_merged) %>%
+  unnest(final_merged) %>%
+  mutate(contig = str_extract(string = ID, pattern = ".*(?=_FRAGMENT)")) %>% #extract contig name
+  select(-(Header:final_merged)) %>%
+  distinct()
+
+contig_df %>%
+  write_csv("ITSx_contigs/contig_df.csv") # write csv matching contig to genome to file
+    
+contig_df %>%
+  select(contig) %>%
+  distinct() %>%
+  drop_na() %>%
+  write_tsv("ITSx_contigs/contigs_to_download.txt", col_names = FALSE) # create list to downloaad on CARC
+
+  
+
+
+
+
+
+
+
+for (i in 1:nrow(cleaned_SSU_LSU_stats)){
+
+  cleaned_SSU_LSU_stats %>%
+    slice(i) %>%
+    select(genome, summary, NCBI_Species_Strain, NCBI_Phylum, NCBI_Order)  %>% 
+    print()
+  
+  cleaned_SSU_LSU_stats$final_merged[[i]] %>%
+    select(ID, Sequence, Origin, Domains, First_Domain, Last_Domain, Start, End, Specific_Origin_Info, Classification, Identity,Taxonomy_length, Reliability_Score, Region:Genus_Match) %>%
+    View()
+  
+  readline(prompt="View next ")
+    
+}
+
+
+# prioritizng number of domains covered and taxonomy matches. Will likely adjust since i could get good matches of contamination
+high_quality_reads <- function(dat){
+    if (is.data.frame(dat) == TRUE){
+        output <- 
+          dat %>%
+          filter(Reliability_Score > 90) %>%
+          filter(Domains > 10) %>%
+          filter((Genus_Match + Family_Match + Order_Match +  Phylum_Match) >  0 ) %>%
+          group_by(Region) %>%
+          arrange(desc(Domains, Genus_Match, Family_Match, Order_Match, Phylum_Match, PacBio_region_length)) %>%
+          slice(1) %>%
+          ungroup()
+        
+          if (nrow(output) == 0){
+      
+          output <- "no_reads"
+          }
+      }
+    output 
+}
+
+
+PacBio_high_quality_reads <- function(dat){
+    if (is.data.frame(dat) == TRUE){
+        output <- 
+          dat %>%
+          filter(Span_PacBio_Primer == TRUE) %>%
+          group_by(Region) %>%
+          arrange(desc(Domains, Genus_Match, Family_Match, Order_Match, Phylum_Match, PacBio_region_length)) %>%
+          slice(1) %>%
+          ungroup()
+        
+          if (nrow(output) == 0){
+      
+          output <- "no_reads"
+          }
+      }
+    output 
+  }
+
+region_recovered <- function(dat){
+  
+
+  
+  if (is.data.frame(dat) == TRUE){
+  
+      SSU <- dat %>%
+        filter(Region == "SSU") %>% 
+        nrow()
+      
+      LSU <- dat %>%
+        filter(Region == "LSU") %>% 
+        nrow()
+    
+      output <-  tibble(SSU_Recovered = SSU, LSU_Recovered = LSU)
+  } else {
+    output <- tibble(SSU_Recovered = 0, LSU_Recovered = 0)
+  }
+  output
+}
+
+chosen_reads <- 
+  cleaned_SSU_LSU_stats %>%
+  select(genome, NCBI_Species_Strain:NCBI_Phylum, final_merged) %>%
+  mutate(best_reads = map(final_merged, high_quality_reads)) %>%
+  mutate(map_df(best_reads, region_recovered))
+
+
+# swapping out read function depending on what i want to see
+# this is seeing ones that span the pacbio region
+cleaned_SSU_LSU_stats %>%
+  select(genome, NCBI_Species_Strain:NCBI_Phylum, final_merged) %>%   
+  filter(NCBI_Phylum != "Microsporidia") %>%
+  mutate(best_reads = map(final_merged, high_quality_reads)) %>%
+  mutate(map_df(best_reads, region_recovered)) %>%
+  mutate(overall = case_when(SSU_Recovered > 0 & LSU_Recovered > 0 ~ "Both Recovered",
+                             SSU_Recovered == 0 & LSU_Recovered > 0 ~ "Only LSU Recovered",
+                             SSU_Recovered > 0 & LSU_Recovered == 0 ~ "Only SSU Recovered",
+                             SSU_Recovered == 0 & LSU_Recovered == 0 ~ "Neither Recovered")) %>%
+  count(overall) %>%
+  mutate(percent = 100*n/sum(n))
+
+PacBio_friendly_reads <- 
+  cleaned_SSU_LSU_stats %>%
+  select(genome, NCBI_Species_Strain:NCBI_Phylum, final_merged) %>%   
+  filter(NCBI_Phylum != "Microsporidia") %>%
+  mutate(best_reads = map(final_merged, PacBio_high_quality_reads)) %>%
+  mutate(map_df(best_reads, region_recovered)) %>%
+  mutate(overall = case_when(SSU_Recovered > 0 & LSU_Recovered > 0 ~ "Both Recovered",
+                             SSU_Recovered == 0 & LSU_Recovered > 0 ~ "Only LSU Recovered",
+                             SSU_Recovered > 0 & LSU_Recovered == 0 ~ "Only SSU Recovered",
+                             SSU_Recovered == 0 & LSU_Recovered == 0 ~ "Neither Recovered"))
+
+PacBio_friendly_reads %>%
+  count(overall) %>%
+  mutate(percent = 100*n/sum(n))
+  
+
+
+
+PacBio_friendly_reads %>%
+  group_by(NCBI_Order, overall) %>%
+  count() %>%
+  ungroup() %>%
+  group_by(NCBI_Order) %>%
+  mutate(Family_Total = sum(n)) %>%
+  ungroup() %>%
+  group_by(NCBI_Order, overall) %>%
+  mutate(percent = 100 * n / Family_Total) %>%
+  select(-n) %>%
+  distinct() %>%
+  pivot_wider(names_from = overall, values_from = percent, values_fill = 0) %>%
+  ungroup() %>%
+  mutate(percent_SSU_or_LSU =  100 -`Neither Recovered` ) %>%
+  View()
+
+
+index <- PacBio_friendly_reads$overall %in% c("Only LSU Recovered", "Only SSU Recovered","Neither Recovered")
+
+misses <- 
+  PacBio_friendly_reads %>%
+  filter(overall %in% c("Only LSU Recovered", "Only SSU Recovered","Neither Recovered"))
+
+for (i in 1:nrow(misses)){
+
+  misses %>%
+    slice(i) %>%
+    select(genome, NCBI_Species_Strain, NCBI_Phylum, NCBI_Order, overall)  %>% 
+    print()
+  
+  misses$final_merged[[i]] %>%
+    select(ID, Sequence, Origin, Domains, First_Domain, Last_Domain, Start, End, Specific_Origin_Info, Classification, Identity,Taxonomy_length, Reliability_Score, Region:Genus_Match) %>%
+    View()
+  
+  readline(prompt="View next ")
+    
+}
+
+
+# NEXT STEPS
+# 
+
+````
