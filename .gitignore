@@ -1,0 +1,20 @@
+*.fasta
+Notes on sequences removed
+Pipeline.pptx
+RNAfold/
+Silva_NCBI/
+Silva_Raw/
+Trim_Silva.Rmd
+barrnap_cleanup.Rmd
+barrnap_results/
+blast_attempt.Rmd
+*.csv
+blast_rrna_regions_nt_merged.csv.zip
+final_blast/
+metaxa_output/
+rRNA_Tree/
+rRNA_blast.R
+rRNA_to_blast_primers.fasta
+rRNA_to_blast_primers_hits.text
+test_rnafold_output.txt
+
