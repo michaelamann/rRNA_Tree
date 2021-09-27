@@ -24,7 +24,6 @@ rRNA_download_script.pbs
 #PBS -m ae
 #PBS -M mimann@unm.edu
 
-
 module load parallel-20170322-gcc-4.8.5-2ycpx7e
 
 source $(which env_parallel.bash)
