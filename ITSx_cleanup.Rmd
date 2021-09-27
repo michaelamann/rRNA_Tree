@@ -1,0 +1,73 @@
+---
+title: "ITSx_extracts_cleanup"
+author: "Michael Mann"
+date: "9/27/2021"
+output: html_document
+---
+
+
+
+
+```{r setup}
+library(tidyverse)
+library(microseq)
+```
+
+
+
+```{r read in data}
+cleaned_SSU_LSU_stats <- read_rds("cleaned_SSU_LSU_stats.rds")
+
+contig_df <- read_csv("/Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/ITSx_contigs/contig_df.csv")
+```
+
+
+Goign to merge all the fasta results into one dataframe
+```{r read in ITSx results}
+df_ITSx_cleaner <- function(fasta, region){
+  readFasta(fasta) %>%
+    rename(contig = Header) %>%
+    mutate(contig = str_extract(contig, pattern = ".*(?=\\|.\\|)")) %>%
+    rename(!!region := Sequence) # nonstandard evualuation to create column called that region
+  
+}
+  
+
+SSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.SSU.fasta", region = "SSU")
+
+
+ITS1 <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.ITS1.fasta", region = "ITS1")
+  
+r5_8s <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.5_8S.fasta", region = "r5_8s")
+ITS2 <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.ITS2.fasta", region = "ITS2")
+
+LSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.LSU.fasta", region = "LSU")
+
+# merges all of it and matches it up with the genome.
+ITS_extracts <- 
+  SSU %>%
+  full_join(ITS1, by = "contig") %>%
+  full_join(r5_8s, by = "contig") %>%
+  full_join(ITS2, by = "contig") %>%
+  full_join(LSU, by = "contig") %>%
+  left_join(contig_df, by = "contig") %>%
+  select(contig:LSU, Assembly) %>% # only need to know which genome it came from
+  group_by(Assembly) %>%
+  nest() 
+
+
+cleaned_SSU_LSU_stats_ITSx_contigs <- 
+  cleaned_SSU_LSU_stats %>%
+  left_join(ITS_extracts, by = "Assembly") %>%
+  rename(contigs = data) %>%
+  select(Assembly, NCBI_Phylum, NCBI_Order, NCBI_Species_Name, final_merged, contigs)
+
+### The code works fine but I believe the entrez download missed a bunch of stuff. Going to need to update it on CARC and run again. 
+for (i in 1:1300){
+slice(cleaned_SSU_LSU_stats_ITSx_contigs, i) %>% print()
+cleaned_SSU_LSU_stats_ITSx_contigs$final_merged[[i]] %>% print()
+cleaned_SSU_LSU_stats_ITSx_contigs$contigs[[i]] %>% print()
+
+  readline(prompt="View next ")
+}
+```

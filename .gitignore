@@ -28,3 +28,7 @@ MetazoaEnsemble/
 Problematic_Alignments.Rmd
 *txt
 Genomes_rRNA.Rproj
+Contig_Download/
+*.rds
+*.zip
+cleaned_SSU_LSU_stats.rds

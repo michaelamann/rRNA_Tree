@@ -119,16 +119,6 @@ summary_table %>%
   ungroup() %>%
   mutate(percent = 100*n/sum(n))
 
-
-
-potential_SSU <- 
-  summary_table %>%
-  select(-LSU) %>%
-  filter(summary == "Both Extracted") 
-
-
-
-
 ```
 
 
@@ -313,8 +303,15 @@ taxonomy_read_length_stats <-
 
 cleaned_SSU_LSU_stats <- 
   cleaned_SSU_LSU %>% 
-  mutate(final_merged = pmap(list(NCBI_Phylum, NCBI_Order, NCBI_Family, NCBI_Genus, final_merged), match_taxonomy)) 
+  mutate(final_merged = pmap(list(NCBI_Phylum, NCBI_Order, NCBI_Family, NCBI_Genus, final_merged), taxonomy_read_length_stats)) 
 
+# write it so I can use it 
+write_rds(x = cleaned_SSU_LSU_stats, file = "cleaned_SSU_LSU_stats.rds")
+```
+
+
+
+```{r create ITS contigs}
 ### ITSx_contigs
 # running all contigs through it
 # creating a list of all the contigs used. 
@@ -335,16 +332,16 @@ contig_df %>%
   select(contig) %>%
   distinct() %>%
   drop_na() %>%
-  write_tsv("ITSx_contigs/contigs_to_download.txt", col_names = FALSE) # create list to downloaad on CARC
+  write_tsv("ITSx_contigs/contigs_to_download.txt", col_names = FALSE) # create list to download on CARC
 
-  
-
-
+```
 
 
 
 
 
+
+```{r review results}
 for (i in 1:nrow(cleaned_SSU_LSU_stats)){
 
   cleaned_SSU_LSU_stats %>%
@@ -500,10 +497,7 @@ for (i in 1:nrow(misses)){
 }
 
 
-# NEXT STEPS
-# figuring out next steps
-# seeing if this push works
-# should be visible now. 
-# all good!
+
+
 
 ````
