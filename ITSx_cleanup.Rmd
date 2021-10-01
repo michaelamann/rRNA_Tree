@@ -18,7 +18,7 @@ library(microseq)
 ```{r read in data}
 cleaned_SSU_LSU_stats <- read_rds("cleaned_SSU_LSU_stats.rds")
 
-contig_df <- read_csv("/Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/ITSx_contigs/contig_df.csv")
+contig_df <- read_csv("ITSx_contigs/contig_df.csv")
 ```
 
 
@@ -32,16 +32,18 @@ df_ITSx_cleaner <- function(fasta, region){
   
 }
   
+# i reran these on CARC since the entrez didnt download everything. The web version worked and 
+# had so many sequenes, I had to split the job up and run ITS wtih gnu parallel using the "split files"
+# I merged them all and labeled the fasta with all_*". They are downlaoded here:
+SSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/all_SSU.fasta", region = "SSU")
 
-SSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.SSU.fasta", region = "SSU")
 
-
-ITS1 <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.ITS1.fasta", region = "ITS1")
+ITS1 <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/all_ITS1.fasta", region = "ITS1")
   
-r5_8s <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.5_8S.fasta", region = "r5_8s")
-ITS2 <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.ITS2.fasta", region = "ITS2")
+r5_8s <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/all_5_8S.fasta", region = "r5_8s")
+ITS2 <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/all_ITS2.fasta", region = "ITS2")
 
-LSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/itsx_output.LSU.fasta", region = "LSU")
+LSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/all_LSU.fasta", region = "LSU")
 
 # merges all of it and matches it up with the genome.
 ITS_extracts <- 
@@ -62,12 +64,157 @@ cleaned_SSU_LSU_stats_ITSx_contigs <-
   rename(contigs = data) %>%
   select(Assembly, NCBI_Phylum, NCBI_Order, NCBI_Species_Name, final_merged, contigs)
 
-### The code works fine but I believe the entrez download missed a bunch of stuff. Going to need to update it on CARC and run again. 
-for (i in 1:1300){
-slice(cleaned_SSU_LSU_stats_ITSx_contigs, i) %>% print()
-cleaned_SSU_LSU_stats_ITSx_contigs$final_merged[[i]] %>% print()
-cleaned_SSU_LSU_stats_ITSx_contigs$contigs[[i]] %>% print()
 
-  readline(prompt="View next ")
+
+
+
+```
+
+
+```{r checking if we got ITS from pacbio friendly reads}
+
+PacBio_high_quality_reads <- function(dat){
+    if (is.data.frame(dat) == TRUE){
+        output <- 
+          dat %>%
+          filter(Span_PacBio_Primer == TRUE) %>%
+          group_by(Region) %>%
+          arrange(desc(Domains, Genus_Match, Family_Match, Order_Match, Phylum_Match, PacBio_region_length)) %>%
+          slice(1) %>%
+          ungroup()
+        
+          if (nrow(output) == 0){
+      
+          output <- "no_reads"
+          }
+    } else{
+      output <- "no_reads"
+    }
+  
+    output 
+  }
+
+region_recovered <- function(dat){
+  
+
+  
+  if (is.data.frame(dat) == TRUE){
+  
+      SSU <- dat %>%
+        filter(Region == "SSU") %>% 
+        nrow()
+      
+      LSU <- dat %>%
+        filter(Region == "LSU") %>% 
+        nrow()
+    
+      output <-  tibble(SSU_Recovered = SSU, LSU_Recovered = LSU)
+  } else {
+    output <- tibble(SSU_Recovered = 0, LSU_Recovered = 0)
+  }
+  output
+}
+
+
+ITS_from_best_reads <- function(final_merged, contigs){
+    if (is.data.frame(final_merged) == TRUE & is.data.frame(contigs) == TRUE){
+       
+      contigs_to_keep <- 
+        final_merged %>%
+        select(Header) %>%
+        mutate(Header = str_extract(Header, pattern = ".*(?=\\_FRAGMENT)")) %>%
+        pull(Header)
+        
+       output <- 
+          contigs %>%
+          filter(contig %in% contigs_to_keep)
+        
+          if (nrow(output) == 0){
+      
+          output <- "no_reads"
+          }
+    } else{
+      output <- "no_reads"
+    }
+  
+    output 
+  }
+
+region_recovered_ITS <- function(dat){
+  
+
+  
+  if (is.data.frame(dat) == TRUE){
+    
+    dat <- 
+      dat %>%
+      pivot_longer(SSU:LSU, names_to = "Region", values_to = "Sequence", values_drop_na = TRUE)
+     
+     SSU <- dat %>%
+        filter(Region == "SSU") %>% 
+        nrow()
+     
+     ITS1 <- dat %>%
+        filter(Region == "ITS1") %>% 
+        nrow()
+     
+     
+     r5_8s <- dat %>%
+        filter(Region == "r5_8s") %>% 
+        nrow()
+     
+     
+     ITS2 <- dat %>%
+        filter(Region == "ITS2") %>% 
+        nrow()
+      
+      LSU <- dat %>%
+        filter(Region == "LSU") %>% 
+        nrow()
+    
+      output <-  tibble(SSU_Recovered = SSU, ITS1_Recovered = ITS1, r5_8s_Recovered = r5_8s, ITS2_Recovered = ITS2, LSU_Recovered = LSU)
+  } else {
+    output <- tibble(SSU_Recovered = 0, ITS1_Recovered = 0, r5_8s_Recovered = 0, ITS2_Recovered = 0, LSU_Recovered = 0)
+  }
+  output
+}
+
+PacBio_friendly_reads <- 
+  cleaned_SSU_LSU_stats %>%
+  left_join(ITS_extracts, by = "Assembly") %>%
+  rename(contigs = data) %>%
+  select(genome, NCBI_Species_Strain:NCBI_Phylum, final_merged, contigs) %>%   
+  filter(NCBI_Phylum != "Microsporidia") %>%
+  mutate(best_reads = map(final_merged, PacBio_high_quality_reads)) %>%
+  mutate(map_df(best_reads, region_recovered)) %>%
+  mutate(ITS_recovered = map2(best_reads, contigs, ITS_from_best_reads)) %>%
+  mutate(map_df(ITS_recovered, region_recovered_ITS)) %>% # tally up how many regions found with ITSx
+  mutate(overall = case_when(SSU_Recovered > 0 & LSU_Recovered > 0 ~ "Both Recovered",
+                             SSU_Recovered == 0 & LSU_Recovered > 0 ~ "Only LSU Recovered",
+                             SSU_Recovered > 0 & LSU_Recovered == 0 ~ "Only SSU Recovered",
+                             SSU_Recovered == 0 & LSU_Recovered == 0 ~ "Neither Recovered")) 
+
+
+PacBio_friendly_reads %>%
+  select(-NCBI_Species_Strain, -NCBI_Strain, -contigs, NCBI_Genus, -NCBI_Family,  -NCBI_Family, -NCBI_Subphylum, -best_reads, -final_merged, -ITS_recovered) %>%
+  filter(overall != "Neither Recovered")  %>%
+  View()
+  
+
+```
+
+
+
+
+```{r diagnostics}
+
+start <- 14
+for(i in start:1300){
+  print(i)
+  slice(cleaned_SSU_LSU_stats_ITSx_contigs, i) %>% print() # print name of genome
+  cleaned_SSU_LSU_stats_ITSx_contigs$final_merged[[i]] %>% print() # print metaxa2 results
+  cleaned_SSU_LSU_stats_ITSx_contigs$contigs[[i]] %>% print() # print ITSx resuls. 
+  
+  readline(prompt = "View next ")
 }
 ```
