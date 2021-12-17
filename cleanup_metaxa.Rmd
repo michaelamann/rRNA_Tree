@@ -310,7 +310,7 @@ write_rds(x = cleaned_SSU_LSU_stats, file = "cleaned_SSU_LSU_stats.rds")
 ```
 
 
-
+I am runing ITSx on all of the contigs recovered.
 ```{r create ITS contigs}
 ### ITSx_contigs
 # running all contigs through it
@@ -375,7 +375,9 @@ high_quality_reads <- function(dat){
       
           output <- "no_reads"
           }
-      }
+    } else{
+      output <- "no_reads"
+    }
     output 
 }
 
@@ -394,7 +396,10 @@ PacBio_high_quality_reads <- function(dat){
       
           output <- "no_reads"
           }
-      }
+    } else{
+      output <- "no_reads"
+    }
+  
     output 
   }
 
@@ -456,6 +461,9 @@ PacBio_friendly_reads %>%
   mutate(percent = 100*n/sum(n))
   
 
+PacBio_friendly_reads %>%
+  select(NCBI_Species_Strain, final_merged:best_reads, overall) %>%
+  print(n = 300)
 
 
 PacBio_friendly_reads %>%

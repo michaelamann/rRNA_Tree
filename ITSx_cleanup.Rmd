@@ -10,7 +10,7 @@ output: html_document
 
 ```{r setup}
 library(tidyverse)
-library(microseq)
+library(microseq) # work with fasta files
 ```
 
 
@@ -33,7 +33,7 @@ df_ITSx_cleaner <- function(fasta, region){
 }
   
 # i reran these on CARC since the entrez didnt download everything. The web version worked and 
-# had so many sequenes, I had to split the job up and run ITS wtih gnu parallel using the "split files"
+# had so many sequenes, I had to split the job up and run ITS with gnu parallel using the "split files"
 # I merged them all and labeled the fasta with all_*". They are downlaoded here:
 SSU <- df_ITSx_cleaner(fasta = "ITSx_contigs/Contig_Download/all_SSU.fasta", region = "SSU")
 
@@ -58,6 +58,7 @@ ITS_extracts <-
   nest() 
 
 
+# this merges the ITSx contig tabel with the rest of the metaxa2 results
 cleaned_SSU_LSU_stats_ITSx_contigs <- 
   cleaned_SSU_LSU_stats %>%
   left_join(ITS_extracts, by = "Assembly") %>%
@@ -194,11 +195,10 @@ PacBio_friendly_reads <-
                              SSU_Recovered > 0 & LSU_Recovered == 0 ~ "Only SSU Recovered",
                              SSU_Recovered == 0 & LSU_Recovered == 0 ~ "Neither Recovered")) 
 
-
+# 
 PacBio_friendly_reads %>%
-  select(-NCBI_Species_Strain, -NCBI_Strain, -contigs, NCBI_Genus, -NCBI_Family,  -NCBI_Family, -NCBI_Subphylum, -best_reads, -final_merged, -ITS_recovered) %>%
-  filter(overall != "Neither Recovered")  %>%
-  View()
+  select(-NCBI_Species_Strain, -NCBI_Strain, -best_reads, -final_merged, ) %>%
+  write_csv("Manual_Build/status_all_genomes.csv")
   
 
 ```
@@ -218,3 +218,282 @@ for(i in start:1300){
   readline(prompt = "View next ")
 }
 ```
+
+
+
+## Overview
+Metaxa found the best hits for 18S and 28S, however, I had trouble training it for 5.8S. 
+Instead, I took all the contigs that were useful from Metaxa and ran them through ITSx. 
+
+Given I have two datasets, this script will take the two dataframes and create a final set of fasta files for each 
+gene region and a metadata file with each row being a genome. 
+
+Once this is done, i can merge it with fastas for the strain, hand assembled, and outgroups. 
+
+
+steps:
+1. merge the two datasets (need to match up by genome and accession.)
+2. determine which read will be chosen. 
+3. export the chosen reads and metadata
+
+
+
+1. first need to choose top reads from metaxa. output will be chosen_read_metaxa
+2. Figure out if those reads exist in itsx_contigs. output will be chosen_read_itsx_contig
+3. create a metadata file that combines metadata in each. output will be metadata
+4. create dataframe for each gene region so i can export them at the end. will pivot_wider to make it.output will be r18S, ITS1, r8_s, ITS2, r28S.
+```{r incorporating 5.8S info into it}
+
+# creating ITSx metadata so i can use it to determine the best read. Also converted NULL for empty dataframes to no reads. 
+its_metadata <- function(dat) {
+  if (is.data.frame(dat) == TRUE) {
+    output <- 
+        dat %>%
+        mutate(r5_8s_present = is.character(r5_8s)) %>% # do we have r5_8s
+        mutate(full_ITS_present = (is.character(ITS1) * is.character(r5_8s) * is.character(ITS2)) == TRUE) %>% # must all be present
+        mutate(parts_ITS = is.character(ITS1) + is.character(r5_8s) + is.character(ITS2)) # can be used as a tiebreaker if partial ITS is found
+    }
+  # remake blank dataframes or NULL as no_reads
+  if (is.null(dat)) {
+      
+          output <- "no_reads"
+    }
+  
+    output 
+  
+}
+
+# need to extract contig accession number so i can match them up. going to replace NA in final merged with "no_reads"
+metaxa_contig <- function(dat) {
+    if (is.data.frame(dat) == TRUE) {
+    output <- 
+        dat %>%
+        mutate(contig = str_replace(Header, pattern = "_FRAGMENT.*", replacement = ""))
+    } else if (is.na(dat) == TRUE) {
+      
+          output <- "no_reads"
+    }
+    output 
+}
+
+# this is slightly modified from cleanup_metaxa. I like this version because it prioritizes length of coverage. We already cleaned up the seqs so should be all fungi. 
+PacBio_high_quality_reads <- function(dat){
+    if (is.data.frame(dat) == TRUE){
+        output <- 
+          dat %>%
+          filter(Span_PacBio_Primer == TRUE) %>%
+          group_by(Region) %>%
+          arrange(desc(Domains, Genus_Match, Family_Match, Order_Match, Phylum_Match, PacBio_region_length)) %>%
+          slice(1) %>%
+          ungroup()
+        
+          if (nrow(output) == 0){
+      
+          output <- "no_reads"
+          }
+    } else{
+      output <- "no_reads"
+    }
+  
+    output 
+  }
+  
+
+# using the chosen metaxa reads, I will extract the best read.I will priortize reads 
+itsx_contigs_best_read <- function(chosen_metaxa, itsx){
+  
+  if (is.data.frame(itsx) & is.data.frame(chosen_metaxa)) {
+      
+      # find all contigs
+      chosen_contigs <- 
+        chosen_metaxa %>%
+        pull(contig) %>% 
+        unique()
+    
+
+    
+      # this chooses the top read to include. I
+      itsx <- 
+        itsx %>%
+        mutate(present_metaxa = case_when(contig %in% chosen_contigs ~ TRUE, 
+                 TRUE ~ FALSE)) %>% # update itsx so it has info on whether the same contigs were used
+        filter(r5_8s_present == TRUE) %>% # only keep hits that have 5.8S 
+        arrange(desc(present_metaxa, parts_ITS, full_ITS_present)) %>% # prefers presence in metaxa over complete ITS
+        slice(1)
+      
+      
+      if (nrow(itsx) > 0) {
+        # return top read as output
+        output <- itsx
+      } else if (nrow(itsx) == 0) {
+        output <- "returned a read but didn't span 5.8S. Check his to make sure it's not a parsing problem"
+      }
+  } else if (is.character(itsx) | is.character(chosen_metaxa)) {
+    # return that there are no reads
+    output <- "no_reads"
+  }
+  
+  # return output when done
+  output
+  
+}
+
+
+# merge all metadata from both chosen reads into one dataset. 
+# I am just going to bind the rows so it shows up as one. 
+make_metadata <- function(chosen_metaxa, chosen_read_itsx_contig) {
+  
+  # if reads were found for both:
+  if (is.data.frame(chosen_metaxa) & is.data.frame(chosen_read_itsx_contig)) {
+    
+    chosen_metaxa <- 
+      chosen_metaxa %>%
+      mutate(source = "metaxa2")
+    
+    chosen_read_itsx_contig <- 
+      chosen_read_itsx_contig %>%
+      mutate(source = "ITSx_contigs")
+      
+    output <-   
+      chosen_metaxa %>%
+      bind_rows(chosen_read_itsx_contig)
+      
+    
+  } else if (is.data.frame(chosen_metaxa)) {
+    
+    output <-   
+      chosen_metaxa %>%
+      mutate(source = "metaxa2")
+    
+    
+  } else if (is.data.frame(chosen_read_itsx_contig)) {
+    
+    output <-   
+      chosen_read_itsx_contig %>%
+      mutate(source = "ITSx_contigs")
+     
+  } else {
+    
+     output <-   
+      tibble(source = "no reads")
+  }
+  
+  output 
+}
+
+
+
+
+
+metaxa_itsx_processed <- 
+  cleaned_SSU_LSU_stats_ITSx_contigs %>%
+  mutate(itsx_contigs = map(contigs, its_metadata)) %>% # add the metadata
+  mutate(metaxa = map(final_merged, metaxa_contig)) %>% # cleanup final_merged to no_reads if NA and add contig column so the two dataframes can be compared. renaming it as well to make it simpler to remember what final_merged is
+  select(-final_merged, -contigs) %>% # dropping to save space
+  mutate(chosen_read_metaxa = map(metaxa, PacBio_high_quality_reads)) %>%
+  mutate(chosen_read_itsx_contig = map2(chosen_read_metaxa, itsx_contigs, itsx_contigs_best_read)) %>% # Choose top 5.8S read based on presence in metaxa2
+  mutate(metadata = map2(chosen_read_metaxa, chosen_read_itsx_contig, make_metadata)) # condense all metadata to one dataframe
+
+
+## create the detailed metadata
+metaxa_itsx_processed %>%
+  select(Assembly, NCBI_Species_Name, metadata) %>% # only select metadata and assembly and species name
+  unnest(metadata) %>%
+  select(c(Assembly:contig, r5_8s_present:source)) %>%
+  select(-Sequence, -PacBio_region_length, -LSU, -r5_8s, -ITS1, -SSU, -ITS2, -Specific_Origin_Info) %>%
+  write_csv("Completed_Reads/metdata_test.csv")
+  
+## creating the fasta files
+# pulling out reads for fasta file:
+chosen_metaxa_filtered <- 
+  metaxa_itsx_processed %>%
+  select(Assembly, chosen_read_metaxa) %>%
+  unnest(chosen_read_metaxa) %>%
+  select(Assembly, Region, Sequence) %>%
+  drop_na(Sequence) %>%
+  rename(Header = Assembly)
+  
+# creating 18S sequences
+chosen_metaxa_filtered %>%
+  filter(Region == "SSU") %>%
+  select(-Region) %>%
+  writeFasta("Completed_Reads/Metaxa_complete_18S.fasta")
+  
+# creating 28S sequences
+chosen_metaxa_filtered %>%
+  filter(Region == "LSU") %>%
+  select(-Region) %>%
+  writeFasta("Completed_Reads/Metaxa_complete_28S.fasta")
+
+
+
+# pulling out ITS reads
+chosen_itsx_contig_filtered <- 
+  metaxa_itsx_processed %>%
+  select(Assembly, chosen_read_itsx_contig) %>%
+  unnest(chosen_read_itsx_contig) %>%
+  select(Assembly, ITS1:ITS2) %>%
+  pivot_longer(cols = ITS1:ITS2, names_to = "Region", values_to = "Sequence") %>%
+  drop_na(Sequence) %>%
+  rename(Header = Assembly)
+  
+# creating ITS1
+chosen_itsx_contig_filtered %>%
+  filter(Region == "ITS1") %>%
+  select(-Region) %>%
+  writeFasta("Completed_Reads/ITSx_contig_ITS1.fasta")
+
+# creating 5.8S
+chosen_itsx_contig_filtered %>%
+  filter(Region == "r5_8s") %>%
+  select(-Region) %>%
+  writeFasta("Completed_Reads/ITSx_contig_58S.fasta")
+
+
+# creating ITS2
+chosen_itsx_contig_filtered %>%
+  filter(Region == "ITS2") %>%
+  select(-Region) %>%
+  writeFasta("Completed_Reads/ITSx_contig_ITS2.fasta")
+
+```
+
+This creates a summary that pulls out the contig the sequence came from. this is a quickway to glance at how the algorithms did
+```{r  creating summary analysis}
+metaxa_itsx_processed_summary <- 
+  metaxa_itsx_processed %>%
+  select(-itsx_contigs, -metaxa, -metadata) %>% 
+  unnest(chosen_read_metaxa) %>% 
+  select(Assembly:NCBI_Species_Name, chosen_read_metaxa, Region, contig, chosen_read_itsx_contig) %>% 
+  pivot_wider(names_from = Region, values_from = contig) %>%
+  select(-chosen_read_metaxa, -`NA`) %>%
+  rename(r18S = SSU, r28S = LSU) %>%
+  unnest(chosen_read_itsx_contig) %>%
+  mutate(across(ITS1:ITS2, ~str_replace(.x, pattern = "[:alpha:].*", contig))) %>%
+  select(-contig, -SSU, -chosen_read_itsx_contig, -LSU, -r5_8s_present, -full_ITS_present, -parts_ITS, -present_metaxa) %>%
+  relocate(r18S, .before = ITS1)
+  
+
+
+metaxa_itsx_processed_summary %>% 
+  write_csv("Completed_Reads/metaxa_itsx_processed_summary.csv")
+
+
+## create summary totals. 
+# Percent of taxa recovered by region using Metaxa and ITSx
+metaxa_itsx_processed_summary %>% 
+  pivot_longer(cols = r18S:r28S, names_to = "Region", values_to = "contig") %>%
+  mutate(contig = !is.na(contig)) %>% # find everything that is not an NA
+  group_by(Region) %>%
+  summarise(Captured = sum(contig), Total = n(),  .groups = 'drop') %>%
+  mutate(Percent = round((100 * Captured/Total), 1)) %>%
+  select(-Total)
+
+
+```
+
+  
+  
+
+
+
