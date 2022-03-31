@@ -1,0 +1,261 @@
+---
+title: "Merging_all_sources"
+author: "Michael Mann"
+date: "3/22/2022"
+output: html_document
+---
+
+
+SUPER EXCITING. 
+Going to 
+
+Hiearchary of choosing reads from the different sources:
+1. manual build (including strain, hand assembled, and ITSx from full reads that were avaiable)
+    - this is chosen first since I screened this myself so i Have the most confidence in them. 
+2. Metaxa2 results. Only usable for 18S and 28S. 
+3. ITSx of reaads used by Metaxa2 so i can pull out 5.8S. 
+
+```{r setup}
+library(tidyverse)
+library(microseq) # work with fasta files
+```
+
+
+First step: read in all fasta files. 
+
+Creating dataframe with manual build sequences. 
+
+
+```{r read in in manual data}
+manual_build_df <- 
+  tibble(paths = c("Manual_Build/Clean_Assembled/Assembled_Hand/Congregated/Assembled_Hand_18S.fasta", 
+                   "Manual_Build/Clean_Assembled/Assembled_Hand/Congregated/Assembled_Hand_28S.fasta", 
+                   "Manual_Build/Clean_Assembled/Assembled_Hand/Congregated/Assembled_Hand_58S.fasta", 
+                   "Manual_Build/Clean_Assembled/Assembled_Strain/Congregated/Assembled_Strain_18S.fasta", 
+                   "Manual_Build/Clean_Assembled/Assembled_Strain/Congregated/Assembled_Strain_28S.fasta", 
+                   "Manual_Build/Clean_Assembled/Assembled_Strain/Congregated/Assembled_Strain_58S.fasta",
+                   "Manual_Build/Clean_Assembled/ITSx_Manual_Build/Renamed/Assembled_ITSxgood_18S.fasta", 
+                   "Manual_Build/Clean_Assembled/ITSx_Manual_Build/Renamed/Assembled_ITSxgood_28S.fasta", 
+                   "Manual_Build/Clean_Assembled/ITSx_Manual_Build/Renamed/Assembled_ITSxgood_58S.fasta")) %>%
+
+  mutate(name = str_remove(paths, pattern = ".*Assembled_")) %>%
+  mutate(name = str_remove(name, pattern = ".fasta")) %>%
+  mutate(data = map(paths,  readFasta)) %>% # read in all the data
+  separate(name, into = c("Manual_Type", "Region"), sep = "_") %>% # clean up manual type of data and the region 
+  unnest(data) %>% # unpacking the data
+  rename(Genome = Header) %>% # naming each sequence based off the genome (GCA.*)
+  mutate(Data_Source = "Manual") %>% # all seqs from manual build. need for merging with other sources. 
+  mutate(Genome = str_extract(string = Genome, pattern = ".*\\.[:digit:]")) %>% # clean up name of genome
+  mutate(Genome = str_remove(string = Genome, pattern = "-.*")) # clean up name of genome
+
+
+Metaxa2_df <- 
+  tibble(paths = c("Completed_Reads/Metaxa_complete_18S.fasta", 
+                   "Completed_Reads/Metaxa_complete_28S.fasta")) %>%
+  mutate(Region = str_remove(string = paths, pattern = "Completed_Reads/Metaxa_complete_")) %>%
+  mutate(Region = str_remove(string = Region, pattern = ".fasta")) %>%
+  mutate(Data_Source = "Metaxa2") %>%
+  mutate(data = map(paths,  readFasta)) %>% # read in all the data
+  unnest(data) %>% # unpacking the data
+  rename(Genome = Header) # naming each sequence based off the genome (GCA.*)
+
+
+ITSx_58S <- 
+  tibble(paths = c("Completed_Reads/ITSx_contig_58S.fasta")) %>%
+  mutate(Data_Source = "ITSx_good_Reads") %>%
+  mutate(Region = "58S") %>%
+  mutate(data = map(paths,  readFasta)) %>% # read in all the data
+  unnest(data) %>% # unpacking the data
+  rename(Genome = Header) # naming each sequence based off the genome (GCA.*)
+  
+# removing sequences that are too short. 
+# often this is a problem with ITSx reads. 
+
+
+
+
+merged_seqs <-
+  manual_build_df %>%
+  bind_rows(Metaxa2_df) %>%
+  bind_rows(ITSx_58S) %>%
+  mutate(Sequence = str_remove(Sequence, "-.*")) %>%
+  mutate(length = nchar(Sequence)) %>%
+  filter(Region == "18S" & length >= 400 |
+         Region == "58S" & length >= 100 |
+         Region == "28S" & length >= 400) %>%
+  select(-paths) %>%
+  group_by(Genome, Region) %>%
+  nest() %>%
+  mutate(Region = paste0("r", Region))
+
+```
+
+```{r diagnostic}
+# diagnostic code so i can sift through each and see which are nested for each genome+gene region. 
+operating  <-  TRUE
+i <- 1
+while (operating == TRUE){
+  
+  print(paste0("current index: ", i))
+  View(merged_seqs$data[[i]])
+  response <-  menu(c("Yes", "Reverse", "stop", "choose_number"), title="Continue?")
+  
+  if (response == 1){
+    i <- i + 1
+  } else if (response == 2){
+    i <- i - 1
+  } else if (response == 3){
+    operating <-  FALSE
+  }else if(response == 4){
+    i <- readline("Which index do you want to use? ")
+    i <- as.numeric(i)
+  }
+
+  
+}
+
+```
+
+
+runnign through each region, genome and choosing the read based on this hiearachy:
+
+1. manual build (including strain, hand assembled, and ITSx from full reads that were avaiable)
+    - this is chosen first since I screened this myself so i Have the most confidence in them. 
+2. Metaxa2 results. Only usable for 18S and 28S. 
+3. ITSx of reaads used by Metaxa2 so i can pull out 5.8S. 
+
+```{r choosing the final read}
+
+
+choosing_read_merged <- function(data){
+  data %>%
+    mutate(Data_Source = factor(Data_Source, levels = c("Manual", "Metaxa2", "ITSx_good_Reads"))) %>% # create factor so i can sort by
+    mutate(Manual_Type = factor(Manual_Type, levels = c("Hand", "ITSxgood", "Strain"))) %>% # create factor so i can sort within Manual
+    arrange(Data_Source, Manual_Type) %>% # sort the data  
+    slice(1) # pull the top value
+}
+  
+
+
+merged_chosen_read <- 
+  merged_seqs %>%
+  mutate(number_available_seqs = map_int(data, nrow)) %>% # calculate how many seqs are available
+  mutate(map_df(data, choosing_read_merged)) %>%
+  select(-data) 
+  
+
+merged_chosen_read_wide <- 
+  merged_chosen_read %>%
+  select(Genome, Region, Sequence) %>%
+  pivot_wider(names_from = Region, values_from = Sequence) %>%
+  ungroup() %>%
+  select(Genome, r18S, r58S, r28S)
+
+
+
+
+merged_chosen_read_wide %>%
+  replace_na(list(r18S = "missing", r58S = "missing", r28S = "missing")) %>%
+  mutate(overall = case_when(r18S != "missing" & r58S != "missing" & r28S != "missing"  ~ "All recovered",
+                             r18S != "missing" & r58S != "missing" & r28S == "missing"  ~ "r18S and r58S", 
+                             r18S != "missing" & r58S == "missing" & r28S != "missing"  ~ "r18S and r28S", 
+                             r18S == "missing" & r58S != "missing" & r28S != "missing"  ~ "r58S and r28S",
+                             r18S != "missing"   ~ "r18S", 
+                             r58S != "missing"   ~ "r58S", 
+                             r28S != "missing"   ~ "r28S")) %>%
+  count(overall) %>%
+  mutate(percent = 100 * n / 1312) %>%   # excluded yeasts for now
+  arrange(desc(percent))
+                            
+
+```
+
+
+```{r add outgroups}
+outgroups_df <- 
+  tibble(paths = c("MetazoaEnsemble/Finished_Seqs/Outgroup_18S.fasta", 
+                   "MetazoaEnsemble/Finished_Seqs/Outgroup_58S.fasta", 
+                   "MetazoaEnsemble/Finished_Seqs/Outgroup_28S.fasta")) %>%
+  mutate(name = str_remove(string = paths, pattern = "MetazoaEnsemble/Finished_Seqs/")) %>%
+  mutate(name = str_remove(string = name, pattern = ".fasta")) %>%
+  mutate(data = map(paths,  readFasta)) %>% # read in all the data
+  separate(name, into = c("Data_Source", "Region"), sep = "_") %>% # clean up manual type of data and the region 
+  unnest(data) %>%  # unpacking the data 
+  rename(old_taxonID_linked_genome_sequence = Header) %>%
+  select(-paths) %>%
+  mutate(Region = paste0("r", Region)) %>%
+  pivot_wider(names_from = Region, values_from = Sequence) %>%
+  ungroup() %>%
+  select(old_taxonID_linked_genome_sequence, r18S, r58S, r28S)
+  
+
+```
+
+
+
+```{r merge outgroups and switch from genome to species name}
+
+# bring in metadata
+metadata <- 
+  read_csv("genomes_metadata.csv") %>%
+  select(old_taxonID_linked_genome_sequence, Assembly) %>%
+  rename(Genome = Assembly)
+  
+
+# cleaned it up wiht the right names
+# add outgroup seqs too
+
+
+final_merged_df <- 
+  merged_chosen_read_wide %>%
+  left_join(metadata, by = "Genome") %>%
+  select(old_taxonID_linked_genome_sequence, r18S, r58S, r28S) %>%
+  bind_rows(outgroups_df) %>%
+  rename(Header = old_taxonID_linked_genome_sequence)
+  
+  
+
+
+
+
+
+
+
+
+```
+
+Writing them to file under the Completed_Reads/Final_Merged/ folder
+```{r write each gene region to file}
+
+
+# 18S 
+final_merged_df %>%
+  select(Header, r18S) %>%
+  rename(Sequence = r18S) %>%
+  drop_na() %>% # remove the seqs that are missing
+  writeFasta("Completed_Reads/Final_Merged/r18S.fasta")
+
+
+# 5.8S 
+final_merged_df %>%
+  select(Header, r58S) %>%
+  rename(Sequence = r58S) %>%
+  drop_na() %>%
+  mutate(Sequence = str_trunc(Sequence, width = 200, ellipsis = "")) %>% # some ITSx seqs are super super long and messes up MAFFT.
+  writeFasta("Completed_Reads/Final_Merged/r58S.fasta")
+
+
+
+
+# 28S 
+final_merged_df %>%
+  select(Header, r28S) %>%
+  rename(Sequence = r28S) %>%
+  drop_na() %>%
+  writeFasta("Completed_Reads/Final_Merged/r28S.fasta")
+```
+
+
+
+
+

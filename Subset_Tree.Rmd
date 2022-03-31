@@ -1,0 +1,58 @@
+---
+title: "Subset_Tree"
+author: "Michael Mann"
+date: "3/31/2022"
+output: html_document
+---
+
+```{r setup}
+
+library(tidyverse)
+library(ape)
+library(microseq) # work with fasta files
+```
+
+
+
+```{r read in data}
+# tree
+phylogenomic_tree <- read.nexus("1672taxa_29genes_bb1_1.nexus")
+
+# to differentiate, i am adding the Phylogenomic_ label to each taxon. 
+# cleaning up the tree file names so the names match wiht the fasta file
+phylogenomic_tree$tip.label <- 
+  paste0("Phylogenomic_", phylogenomic_tree$tip.label) %>%
+  str_replace_all(pattern = "'", replacement = "") %>% # some of the strain species names had extra symbols. I removed them.
+  str_replace_all(pattern = "-", replacement = "") # some of the strain species names had extra symbols. I removed them.
+
+# 18S seqs recovered
+recovered_18S <- readFasta("Completed_Reads/Final_Merged/MAFFT_Aligned_Cleaned_4/final_merged_18S_cleaned_twice_for_MAFFT.fasta")
+
+tips_18S <- recovered_18S$Header
+
+# 28S seqs recovered
+recovered_28S <- readFasta("Completed_Reads/Final_Merged/MAFFT_Aligned_Cleaned_4/final_merged_28S_cleaned_twice_for_MAFFT.fasta")
+
+tips_28S <- recovered_28S$Header
+
+tips_either_18S_28S <- unique(c(tips_18S, tips_28S))
+
+# summary table of the number of taxa included in each dataset or both!
+tibble(tips_18S = length(tips_18S), 
+                        tips_28S = length(tips_28S),
+                        Either_18S_or_28S = length(tips_either_18S_28S),
+)
+
+  
+
+
+
+Tree_18S <- keep.tip(phylogenomic_tree, tips_18S)
+Tree_28S <- keep.tip(phylogenomic_tree, tips_28S)
+Tree_18S_28S <- keep.tip(phylogenomic_tree, tips_either_18S_28S)
+
+write.tree(Tree_18S, "Constraint_Trees/Tree_18S.tree")
+write.tree(Tree_28S, "Constraint_Trees/Tree_28S.tree")
+write.tree(Tree_18S_28S, "Constraint_Trees/Tree_18S_28S.tree")
+
+```
