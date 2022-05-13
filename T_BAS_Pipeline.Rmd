@@ -1,0 +1,183 @@
+---
+title: "Pezio_cleanup_for_raxml"
+author: "Michael Mann"
+date: "5/2/2022"
+output: html_document
+---
+
+
+Using this code to keep track of all SSU Pezizo testing. 
+
+This is using T-BAS SSU pezizo sequences, AFTOL, and the phylogenomic sequences. 
+this code is 
+```{r setup, include=FALSE}
+library(tidyverse)
+library(microseq)
+library(ape)
+#library(phylotools) # i use this to create the phylip file needed for raxml and partitionfinder
+```
+
+
+ran on xena wiht the job: rguidance_job.slurm
+```{bash guidance}
+
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=rguidance2
+#SBATCH --partition=bigmem-3TB
+
+source activate rguidance
+
+cd /users/mimann/xena-scratch/guidance
+
+Rscript rguidace_script.R
+```
+
+I chose to run guidance2 through rGUIDANCE this time (AFTOL one was done through CIPRES). This was done because I am running out of room on cipres and the normal guidance wasn't working. Thankfully the r version was functiona. This outputs the residual cols i can use for weights. output of this model was downloaded to /Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/T_BAS_2022/Pezinomycotina/guidance
+```{r rscript for guidance2}
+library(rGUIDANCE)
+library(ape)
+
+alignment <- read.FASTA("SSU_AFTOL_phylogenomic_T_Bas.fasta")
+
+guide <- guidance(alignment, ncore = 32, msa.exec = "/users/mimann/.conda/envs/rguidance/bin/mafft")
+
+# just a backup just in case anything wonky happens
+saveRDS(guide, file = "/users/mimann/xena-scratch/guidance/guidance_run_backup.rds")
+
+write.csv(rGUIDANCE::scores(guide, "column"), "/users/mimann/xena-scratch/guidance/MSA.MAFFT.Guidance2_res_pair_col.scr.csv")
+
+```
+
+
+WARNING This guidance object is over 200gb so it will be hard to open locally! running it on the big mem node to export MSA
+```{r extract MSA from guidance object}
+library(rGUIDANCE)
+library(ape)
+
+guide <- readRDS(file = "/users/mimann/xena-scratch/guidance/guidance_run_backup.rds")
+
+write.FASTA(guide@msa, "/users/mimann/xena-scratch/guidance/guidance_msa_output.fasta")
+
+```
+
+
+```{bash slurm job to extract MSA}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=1:00:00
+#SBATCH --job-name=extract_msa
+#SBATCH --partition=bigmem-3TB
+
+source activate rguidance
+
+cd /users/mimann/xena-scratch/guidance
+
+Rscript extract_msa.R
+
+```
+
+
+
+Now going to create files needed for partitionfinder and raxml-ng. 
+going to create 
+  1. weights file using the guidance output. going to scale it from 0 to 50 and remove 0s. 
+  2. clean up alignment to match weights. Also going to remove amibgious sites (checkign use the ips that runs raxml)
+  3. make sure constraint tree from AFTOL raxml run still works ok. 
+```{r cleaning up guidance}
+
+# i modified this from the guidance2 script to work with rGUIDANCE output
+# scales to 50 again. 
+score_corrector_pezizo <- function(scores_path, fasta_path){
+  library(microseq)
+fasta <-  readFasta(fasta_path)
+
+scores <- 
+  read_csv(scores_path) %>%
+  select(column.col, column.score) %>%
+  rename(COL = column.col, 
+         RES_PAIR_COLUMN_SCORE= column.score)
+
+
+zero_cols_missing <- data.frame(COL = 1:nchar(fasta[1,2]), 
+                               RES_PAIR_COLUMN_SCORE = 0)
+
+# find columns missing with antijoin and then add rows back in with bind_rows
+# i dropped the values to 50 so the dataset would be smaller
+anti_join(zero_cols_missing, scores, by = "COL") %>%
+  bind_rows(scores) %>%
+  arrange(COL) %>%
+  mutate(RES_PAIR_COLUMN_SCORE = round(RES_PAIR_COLUMN_SCORE * 50)) %>%
+  return()
+
+}
+
+corrected_scores <- score_corrector_pezizo(scores_path = "T_BAS_2022/Pezinomycotina/guidance/MSA.MAFFT.Guidance2_res_pair_col.scr.csv", 
+                fasta_path = "T_BAS_2022/Pezinomycotina/guidance/guidance_msa_output.fasta")
+
+```
+
+
+trim alignment to exlude weights of zero
+```{r trim alignment to exlude weights of zero}
+
+# create file for weights
+corrected_scores %>%
+  filter(RES_PAIR_COLUMN_SCORE > 0) %>%
+  pull(RES_PAIR_COLUMN_SCORE) %>%
+  paste(sep="", collapse=" ") %>%
+  write.table( file = "T_BAS_2022/Pezinomycotina/input_raxml/pezizo_SSU_weights.txt", col.names = F, row.names = F, quote = F)
+
+all_seqs <- phylotools::read.fasta("T_BAS_2022/Pezinomycotina/guidance/guidance_msa_output.fasta") 
+
+index_residues <- 
+  corrected_scores %>%
+  pull(RES_PAIR_COLUMN_SCORE) > 0
+
+# clean up each seq by index
+index_puller <- function(string, index){
+  string[index]
+}
+
+seqs_clean <- 
+  all_seqs$seq.text %>%
+  str_extract_all(boundary("character")) %>% # break it down into each character is an index
+  map(.f = index_puller, index = index_residues) %>% # subset and remove zeros
+  map(.f = paste, sep="", collapse="")   %>% # paste it together
+  as_vector()
+
+
+# write alignment to file
+tibble(seq.name = all_seqs$seq.name,  seq.text = seqs_clean) %>%
+  as.data.frame() %>%
+  phylotools::dat2phylip("T_BAS_2022/Pezinomycotina/input_raxml/alignment_raxml_SSU_TBAS_pezizo.phylip")
+```
+
+
+```{r clean up names in constraint tree}
+
+# reading in alignment with only the phylogenomic tips i want to include. 
+reduced_alignment <- phylotools::read.phylip("T_BAS_2022/Pezinomycotina/prelim_parse/T1.raxml.reduced.phy", clean_name = FALSE)
+
+# read in tree
+tree <- read.tree("Constraint_Trees/Tree_18S_AFTOL_Validated.tree")
+
+tips_to_include <- 
+  tibble(tips = reduced_alignment$seq.name) %>%
+  filter(str_detect(tips, pattern = "Phylogenomic_")) %>%
+  pull(tips)
+
+tree_reduced <- keep.tip(tree, tips_to_include)
+
+
+write.tree(tree_reduced, "T_BAS_2022/Pezinomycotina/input_raxml/constraint_tree_no_redundant_taxa.tree")
+
+```
+
+
+
+
+

@@ -1,0 +1,86 @@
+---
+title: "rguidance"
+author: "Michael Mann"
+date: "4/25/2022"
+output: html_document
+---
+# just filling in zeros for all columns to ensure nothing is offset with raxml
+```{r setup, include=FALSE}
+library(tidyverse)
+library(microseq)
+```
+
+
+```{r custom function}
+score_corrector <- function(scores_path, fasta_path){
+  library(microseq)
+fasta <-  readFasta(fasta_path)
+
+scores <- read_csv(scores_path) %>%
+  rename(COL = `#COL_NUMBER`, 
+         RES_PAIR_COLUMN_SCORE= `#RES_PAIR_COLUMN_SCORE`)
+
+
+zero_cols_missing <- data.frame(COL = 1:nchar(fasta[1,2]), 
+                               RES_PAIR_COLUMN_SCORE = 0)
+
+# find columns missing with antijoin and then add rows back in with bind_rows
+# i dropped the values to 50 so the dataset would be smaller
+anti_join(zero_cols_missing, scores, by = "COL") %>%
+  bind_rows(scores) %>%
+  arrange(COL) %>%
+  mutate(RES_PAIR_COLUMN_SCORE = round(RES_PAIR_COLUMN_SCORE * 50)) %>%
+  return()
+
+}
+
+```
+
+```{r updating guidance2 residues}
+
+corrected_scores <- 
+  score_corrector(scores_path = "guidance2_output/NGBW-JOB-GUIDANCE2_XSEDE-94C1CEB7815C4DB38B26983D140B2FC1/MSA.MAFFT.Guidance2_res_pair_col.scr.csv", 
+                fasta_path = "guidance2_output/NGBW-JOB-GUIDANCE2_XSEDE-94C1CEB7815C4DB38B26983D140B2FC1/MSA.MAFFT.aln.With_Names.fasta")
+
+# i set the zeros to ones so that raxml-ng will work
+corrected_scores %>%
+  filter(RES_PAIR_COLUMN_SCORE > 0) %>%
+ # mutate(RES_PAIR_COLUMN_SCORE = case_when(RES_PAIR_COLUMN_SCORE == 0 ~ 1, TRUE ~ as.numeric(RES_PAIR_COLUMN_SCORE))) %>%
+  pull(RES_PAIR_COLUMN_SCORE) %>%
+  paste(sep="", collapse=" ") %>%
+  write.table( file = "guidance2_output/weights.txt", col.names = F, row.names = F, quote = F)
+
+all_seqs <- phylotools::read.fasta("guidance2_output/NGBW-JOB-GUIDANCE2_XSEDE-94C1CEB7815C4DB38B26983D140B2FC1/MSA.MAFFT.aln.With_Names.fasta") 
+
+index_residues <- 
+  corrected_scores %>%
+ # mutate(RES_PAIR_COLUMN_SCORE = case_when(RES_PAIR_COLUMN_SCORE == 0 ~ 1, TRUE ~ as.numeric(RES_PAIR_COLUMN_SCORE))) %>%
+  pull(RES_PAIR_COLUMN_SCORE) > 0
+
+
+index_puller <- function(string, index){
+  string[index]
+}
+
+seqs_clean <- 
+  all_seqs$seq.text %>%
+  str_extract_all(boundary("character")) %>% # break it down into each character is an index
+  map(.f = index_puller, index = index_residues) %>% # subset and remove zeros
+  map(.f = paste, sep="", collapse="")   %>% # paste it together
+  as_vector()
+
+
+
+```
+
+
+
+using the cleaned seqs and dropping redundant tips
+```{r export alignment}
+
+# write alignment to file
+tibble(seq.name = all_seqs$seq.name,  seq.text = seqs_clean) %>%
+  as.data.frame() %>%
+  phylotools::dat2phylip("guidance2_output/MSA.MAFFT.aln.With_Names_dropped_zero_cols.phylip")
+
+```

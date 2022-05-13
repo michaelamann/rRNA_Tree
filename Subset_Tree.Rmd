@@ -26,33 +26,50 @@ phylogenomic_tree$tip.label <-
   str_replace_all(pattern = "-", replacement = "") # some of the strain species names had extra symbols. I removed them.
 
 # 18S seqs recovered
-recovered_18S <- readFasta("Completed_Reads/Final_Merged/MAFFT_Aligned_Cleaned_4/final_merged_18S_cleaned_twice_for_MAFFT.fasta")
+recovered_18S <- readFasta("guidance2_output/NGBW-JOB-GUIDANCE2_XSEDE-94C1CEB7815C4DB38B26983D140B2FC1/MSA.MAFFT.aln.With_Names.fasta")
 
-tips_18S <- recovered_18S$Header
+# tips with identical sequences so need to be dropped: I found this out from running raxml-ng
+seqs_to_drop <- c("Phylogenomic_Sporothrix_schenckii","Phylogenomic_Diaporthe_ampelina","Phylogenomic_Fusarium_sporotrichioides","Phylogenomic_Fusarium_venenatum","Phylogenomic_Fusarium_verticillioides","Phylogenomic_Fusarium_sp._Na10","Phylogenomic_Fusarium_proliferatum","Phylogenomic_Fusarium_algeriense","Phylogenomic_Fusarium_azukicola","Phylogenomic_Tolypocladium_sp._Salcha_MEA2","Phylogenomic_Trichoderma_gamsii","Phylogenomic_Trichoderma_guizhouense","Phylogenomic_Escovopsis_sp._Ae720","Phylogenomic_Escovopsis_sp._Ae733","Phylogenomic_Colletotrichum_higginsianum","Phylogenomic_Colletotrichum_coccodes","Phylogenomic_Ceratocystis_cacaofunesta","Phylogenomic_Sclerotinia_sclerotiorum","Phylogenomic_Monilinia_fructigena","Phylogenomic_Rutstroemia_sp._NJR2017a_BBW","Phylogenomic_Rutstroemia_sp._NJR2017a_BVV2","Phylogenomic_Pseudogymnoascus_sp._VKM_F4246","Phylogenomic_Pleurotus_tuoliensis","Phylogenomic_Mrakia_psychrophila","Phylogenomic_Cunninghamella_bertholletiae","Phylogenomic_Epicoccum_nigrum","Phylogenomic_Pyrenophora_triticirepentis","Phylogenomic_Cercospora_nicotianae","Phylogenomic_Cercospora_beticola","Phylogenomic_Microcyclospora_tardicrescens","Phylogenomic_Aspergillus_oryzae","Phylogenomic_Aspergillus_novofumigatus","Phylogenomic_Eurotiomycetes_sp._MA_6038","Phylogenomic_Penicillium_sp._MA_6040","Phylogenomic_Penicillium_verrucosum","Phylogenomic_Penicillium_nordicum")
+
+
+
+
+
+tips_18S <- 
+  tibble(tips = recovered_18S$Header) %>%
+  filter(str_detect(string = tips, pattern = "Phylogenomic")) %>%
+  filter(!(tips %in% seqs_to_drop)) %>%
+  pull(tips)
 
 # 28S seqs recovered
-recovered_28S <- readFasta("Completed_Reads/Final_Merged/MAFFT_Aligned_Cleaned_4/final_merged_28S_cleaned_twice_for_MAFFT.fasta")
+#recovered_28S <- readFasta("Completed_Reads/Final_Merged/MAFFT_Aligned_Cleaned_4/final_merged_28S_cleaned_twice_for_MAFFT.fasta")
 
-tips_28S <- recovered_28S$Header
+#tips_28S <- recovered_28S$Header
 
-tips_either_18S_28S <- unique(c(tips_18S, tips_28S))
+#tips_either_18S_28S <- unique(c(tips_18S, tips_28S))
 
 # summary table of the number of taxa included in each dataset or both!
-tibble(tips_18S = length(tips_18S), 
-                        tips_28S = length(tips_28S),
-                        Either_18S_or_28S = length(tips_either_18S_28S),
-)
+#tibble(tips_18S = length(tips_18S), 
+#                        tips_28S = length(tips_28S),
+#                        Either_18S_or_28S = length(tips_either_18S_28S),
+#)
 
   
 
 
 
+
 Tree_18S <- keep.tip(phylogenomic_tree, tips_18S)
+
+
+
 Tree_28S <- keep.tip(phylogenomic_tree, tips_28S)
 Tree_18S_28S <- keep.tip(phylogenomic_tree, tips_either_18S_28S)
 
-write.tree(Tree_18S, "Constraint_Trees/Tree_18S.tree")
-write.tree(Tree_28S, "Constraint_Trees/Tree_28S.tree")
-write.tree(Tree_18S_28S, "Constraint_Trees/Tree_18S_28S.tree")
+write.tree(Tree_18S, "Constraint_Trees/Tree_18S_AFTOL_Validated_dropped_redundant_tips.tree")
+#write.tree(Tree_28S, "Constraint_Trees/Tree_28S.tree")
+#write.tree(Tree_18S_28S, "Constraint_Trees/Tree_18S_28S.tree")
+
+
 
 ```
