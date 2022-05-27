@@ -22,9 +22,11 @@ genomes_metadata <- read_csv("genomes_metadata.csv")
 
 SSU_Alignment <- readFasta("AFTOL/AFTOL_phylogenomic_SSU_aligned.fasta")
 
+# EACH aligned with MAFFT online (Default settings)
+LSU_Alignment <- readFasta("AFTOL/AFTOL_phylogenomic_LSU_aligned.fasta")
+
 tree <- ape::read.tree("AFTOL/AFTOL_tree.tre")
  
-tree <- ape::read.tree("AFTOL/AFTOL_tree.tre")
 
 
 # AFTOL seqs misssing from tree. Not sure why but its only a handful. 
@@ -41,6 +43,7 @@ missing_seqs <-
 ape::write.tree(
   ape::drop.tip(tree, tip = missing_seqs), file = "AFTOL/AFTOL_tree_for_raxml.tre")
 
+
   
 AFTOL_Aligned <- 
   SSU_Alignment %>%
@@ -49,6 +52,38 @@ AFTOL_Aligned <-
 Phylogenomic_Aligned <- 
   SSU_Alignment %>%
   filter(str_detect(string = Header, pattern = "Phylogenomic_"))
+
+
+
+
+### LSU portion ####
+
+missing_seqs_LSU <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(LSU_Alignment, by = "Header") %>%
+  replace_na(list(Sequence = "missing")) %>%
+  filter(str_detect(string = Header, pattern = "Phylogenomic_", negate = T)) %>%
+  filter(Sequence == "missing") %>%
+  pull(Header)
+
+# create a tree that will work for raxml (dropped three tips)
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs_LSU), file = "AFTOL/AFTOL_tree_for_raxml_LSU.tre")
+
+
+# pull out sequences NOT listed as phylogenomic (pulls out AFTOL)
+AFTOL_Aligned_LSU <- 
+  LSU_Alignment %>%
+  filter(str_detect(string = Header, pattern = "Phylogenomic_", negate = T))
+
+# pull out sequences listed as phylogenomic (everything but AFTOL)
+Phylogenomic_Aligned_LSU <- 
+  LSU_Alignment %>%
+  filter(str_detect(string = Header, pattern = "Phylogenomic_"))
+
+
+
 
 ```
 
@@ -60,6 +95,8 @@ Phylogenomic_Aligned <-
 # making this folder for everything. 
 dir.create("AFTOL/Validation/")
 dir.create("AFTOL/Validation/Region_18S")
+
+
 
 
 ### CREATE RAXML function!!
@@ -74,6 +111,17 @@ raxml <- function(alignment, path){
 
 }
 
+
+raxml_lsu <- function(alignment, path){
+  
+  paste0(
+    "/Users/michaelmann/standard-RAxML-master/RAxML-8.0.3 -n result -s ", 
+    alignment, 
+    " -m GTRCATIX -r /Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/AFTOL/AFTOL_tree_for_raxml_LSU.tre -c 25 -p 23421 -f a -N 100 -x 23423 -o   Cryptosporidium_parvum -w /Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/", 
+    path) %>%
+    system()
+
+}
 
 
 ```
@@ -110,8 +158,49 @@ r18S %>%
 
 
 
-# run raxml  on each family
+# run raxml  on each order
 r18S %>%
   walk2(.x = .$alignment_path, .y = .$path, .f = ~ raxml(alignment = .x, path = .y))
+
+
+
+
+# create folder for 28S
+dir.create("AFTOL/Validation/Region_28S")
+
+### doing same for 28S
+r28S <- 
+  genomes_metadata %>%
+  mutate(Header = paste0("Phylogenomic_", old_taxonID_linked_genome_sequence)) %>%
+  mutate(Header = str_replace_all(Header, pattern = "'", replacement = "")) %>% # some of the strain species names had extra symbols. I removed them.
+  mutate(Header = str_replace_all(Header, pattern = "-", replacement = "")) %>% 
+  right_join(Phylogenomic_Aligned_LSU, by = "Header")  %>%
+  select(Header, NCBI_Order, Sequence) %>%
+  replace_na(list(NCBI_Order = "Outgroup")) %>%
+  group_by(NCBI_Order) %>%
+  nest() %>% 
+  ungroup() %>%
+  mutate(AFTOL = list(AFTOL_Aligned_LSU)) %>%
+  mutate(merged = map2(data, AFTOL, bind_rows)) %>%
+  select(-data, -AFTOL) %>%
+  mutate(path = paste0("AFTOL/Validation/Region_28S/", NCBI_Order)) %>%
+  mutate(alignment_path = paste0(path, "/", NCBI_Order, "_aligned.fasta")) 
+
+# create folders
+r28S %>% 
+  walk(.x = .$path, .f  = dir.create)
+
+  # write alignments with AFTOL and one family to file
+r28S %>% 
+  walk2(.x = .$merged, .y = .$alignment_path,  .f  = ~ writeFasta(fdta = .x, out.file = .y))
+
+library(furrr)
+
+plan(multisession, workers = 8)
+
+# run raxml  on each order
+r28S %>%
+  future_walk2(.x = .$alignment_path, .y = .$path, .f = ~ raxml_lsu(alignment = .x, path = .y))
+
 
 ```

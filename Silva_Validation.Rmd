@@ -1,0 +1,42 @@
+---
+title: "Silva_Validation"
+author: "Michael Mann"
+date: "5/26/2022"
+output: html_document
+---
+
+After checking the sequences using AFTOL. I am doing a final check by running them through silva to make sure they are hitting the right sequence. 
+
+
+```{r librarries}
+library(tidyverse)
+
+```
+
+```{r read in results}
+
+silva_ssu <- read_csv("Silva_Validation/SSU/arb-silva.de_align_resultlist_1168287.csv")
+
+silva_lsu <- read_csv("Silva_Validation/LSU/arb-silva.de_align_resultlist_1168291.csv")
+```
+
+# reblasting everything with a quality below 50. The really low quality ones need to be removed or cleaned but once you get to the 40s, it seems real.
+
+```{r explore}
+
+
+silva_ssu %>%
+  arrange((quality)) %>%
+  select(job_id:identity,quality, lca_tax_slv) %>%
+  View()
+
+
+
+silva_lsu %>%
+  arrange((quality)) %>%
+  select(job_id:identity,quality, lca_tax_slv) %>%
+  View()
+
+
+
+```
