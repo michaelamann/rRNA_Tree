@@ -1,0 +1,37 @@
+---
+title: "raxml_test_dataset"
+author: "Michael Mann"
+date: "6/3/2022"
+output: html_document
+---
+
+code for running raxml for test dataset!!
+
+creates partition file
+```{bash partition.txt}
+DNA, SSU = 1-5058
+DNA, LSU = 5059-12985
+```
+
+raxml.slurm job
+```{bash raxml.slurm}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=raxml
+#SBATCH --partition=bigmem-1TB
+
+source activate raxml_ng_install
+
+cd /users/mimann/xena-scratch/test_set/raxml/raxml_run
+
+# clean up alignment
+raxml-ng --parse --msa SSU_LSU_alignment.phy --model GTR+I+G --prefix T1 --site-weights weights.txt --model partition.txt
+
+# run everything
+raxml-ng --all --msa T1.raxml.rba --threads 64 --outgroup Phylogenomic_Ichthyophonus_hoferi --model GTR+I+G --tree pars{10} --bs-trees 100 --tree-constraint constraint_tree_no_redundant_taxa.tree --bs-metric TBE 
+```
+
+1556
+enerating 10 parsimony starting tree(s) with 1813 taxa

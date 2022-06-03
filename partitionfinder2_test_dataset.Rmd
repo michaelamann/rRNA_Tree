@@ -5,11 +5,9 @@ date: "6/2/2022"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-library(tidyverse)
-```
+running partitionfinder2 to choose best substitution model (it chose GTR + I + G as expected).
 
-Creating cfg file to set parameters for partitionfinder2. Runnign models used for raxml
+Creating cfg file to set parameters for partitionfinder2. Runnign models used for raxml.
 
 ```{bash data_block}
 ## ALIGNMENT FILE ##
