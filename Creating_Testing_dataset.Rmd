@@ -1,0 +1,136 @@
+---
+title: "Creating_testing_dataset"
+author: "Michael Mann"
+date: "5/27/2022"
+output: html_document
+---
+
+
+Now that i have sequences validated, I want to create a dataset using ascos (T-BAS) and agaricos (Sanchez-Garcia et al) to see how they fare. Since It would be too large to run all of them, I will try to limit the number of taxa in each genus so i can get a large swath of the phylogenetic diversity.
+
+```{r packages}
+library(microseq)
+library(tidyverse)
+
+```
+
+
+Mergin
+```{r read in data}
+# T-Bas data
+asco_seq_SSU <- readFasta("T_BAS_2022/Pezinomycotina/nucSSU-trimmed.fas") %>%
+  rename(SSU = Sequence) %>%
+  mutate(SSU = str_remove_all(SSU, pattern = "\\?"))
+
+
+asco_seq_LSU <- readFasta("T_BAS_2022/Pezinomycotina/nucLSU-trimmed.fas") %>%
+  rename(LSU = Sequence) %>%
+   mutate(LSU = str_remove_all(LSU, pattern = "\\?"))
+
+
+
+#Sanchez-Garcia
+agarico_seq_SSU <- 
+  readFasta("Sanchez_Garcia_Agaricomycetes_Tree/Sanchez_Garcia_18S.fasta") %>%
+  rename(SSU = Sequence) %>%
+  mutate(SSU = str_remove_all(SSU, pattern = "-")) %>%
+  na_if("")  %>%
+  drop_na(SSU) %>% # remove taxa that aren't present
+  mutate(seq_length = nchar(SSU)) %>%
+  filter(seq_length > 300) %>% # drop really short sequences
+  select(-seq_length)
+  
+
+agarico_seq_LSU <- 
+  readFasta("Sanchez_Garcia_Agaricomycetes_Tree/Sanchez_Garcia_28S.fasta") %>%
+  rename(LSU = Sequence) %>%
+  mutate(LSU = str_remove_all(LSU, pattern = "-")) %>%
+  na_if("")  %>%
+  drop_na(LSU) %>% # remove taxa that aren't present
+  mutate(seq_length = nchar(LSU)) %>%
+  filter(seq_length > 300) %>%
+  select(-seq_length)
+
+
+
+
+
+### Phylogenomic dataset ###
+
+# going to drop AFTOL seqs for now since I will be using their alignment with guidance2
+
+phylogenomic_SSU <- 
+  readFasta("Test_Set/SSU_valided_AFTOL_Silva_unaligned.fasta") 
+
+phylogenomic_LSU <- 
+  readFasta("Test_Set/LSU_valided_AFTOL_Silva_unaligned.fasta") 
+  
+```
+
+Only selecting one sequence per genus. Only selecting ones with both 18S and 28S
+```{r  processing}
+asco_set <- 
+  asco_seq_SSU %>%
+  full_join(asco_seq_LSU, by = "Header") %>%
+  mutate(seq_presence = case_when(
+           is.na(SSU) == FALSE & is.na(LSU) == FALSE ~ "Both_seqs", 
+          is.na(SSU) == FALSE ~ "Only SSU", 
+         is.na(LSU) == FALSE ~ "Only LSU")) %>%
+  filter(seq_presence == "Both_seqs") %>% # only include seqs with both a 18S and 28S seq
+  separate(Header, into = c("Genus", "Epithet"), extra = "drop",  remove = FALSE) %>% # split it up so i can group by genus
+  group_by(Genus) %>%
+  slice(1) %>% # grab only one sequence from each genus
+  ungroup() %>%
+  mutate(Header = str_c("TBAS", Header, sep = "_"))
+
+# 577 taxa
+nrow(asco_set)
+
+
+agarico_set <- 
+  agarico_seq_SSU %>%
+  full_join(agarico_seq_LSU, by = "Header") %>%
+  mutate(seq_presence = case_when(
+           is.na(SSU) == FALSE & is.na(LSU) == FALSE ~ "Both_seqs", 
+          is.na(SSU) == FALSE ~ "Only SSU", 
+         is.na(LSU) == FALSE ~ "Only LSU")) %>%
+  filter(seq_presence == "Both_seqs") %>% # only include seqs with both a 18S and 28S seq
+  separate(Header, into = c("Genus", "Epithet"), extra = "drop",  remove = FALSE) %>% # split it up so i can group by genus
+  group_by(Genus) %>%
+  slice(1) %>% # grab only one sequence from each genus
+  ungroup() %>%
+  mutate(Header = str_c("Agarico", Header, sep = "_"))
+
+# 327 taxa
+nrow(agarico_set)
+```
+
+Merging the asco, agarico, and phylogenomic into one fasta for 18S and one for 28S
+```{r merge datasets}
+
+
+test_set_merged <- 
+  asco_set %>%
+  bind_rows(agarico_set) 
+
+
+test_set_merged %>%
+  select(Header, SSU) %>%
+  rename(Sequence = SSU) %>%
+  bind_rows(phylogenomic_SSU) %>%
+  mutate(Sequence = str_remove_all(Sequence, "-")) %>%
+  writeFasta("Test_Set/test_set_18S.fasta")
+
+
+
+
+test_set_merged %>%
+  select(Header, LSU) %>%
+  rename(Sequence = LSU) %>%
+  bind_rows(phylogenomic_LSU) %>%
+  mutate(Sequence = str_remove_all(Sequence, "-")) %>%
+  writeFasta("Test_Set/test_set_28S.fasta")
+
+
+```
+

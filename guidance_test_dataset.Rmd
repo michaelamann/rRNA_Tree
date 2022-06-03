@@ -1,0 +1,164 @@
+---
+title: "guidance_test_dataset"
+author: "Michael Mann"
+date: "6/2/2022"
+output: html_document
+---
+
+Cleaning up output from guidance2 run on carc. 
+Taking output and plugging it into partitionfinder2
+```{r setup, include=FALSE}
+library(tidyverse)
+library(microseq)
+```
+
+slurm job run on xena at
+/users/mimann/xena-scratch/test_set/guidance:
+
+```{bash slurm job}
+#!/bin/bash
+#SBATCH --ntasks=32
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=guidance_jobs
+#SBATCH --partition=bigmem-3TB
+
+source activate rguidance
+
+cd /users/mimann/xena-scratch/test_set/guidance/LSU
+
+Rscript rguidance_script_LSU.R
+
+cd /users/mimann/xena-scratch/test_set/guidance/SSU
+Rscript rguidance_script_SSU.R
+```
+
+LSU guidance 2 rscript
+```{bash LSU guidance2 script}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=LSU_guidance
+#SBATCH --partition=bigmem-3TB
+
+source activate rguidance
+
+cd /users/mimann/xena-scratch/test_set/guidance/LSU
+
+Rscript rguidance_script_LSU.R
+```
+
+
+SSU r script
+```{bash SSU guidance2 script}
+library(rGUIDANCE)
+library(ape)
+
+alignment <- read.FASTA("test_set_18S.fasta")
+
+guide <- guidance2(alignment, ncore = 32, msa.exec = "/users/mimann/.conda/envs/rguidance/bin/mafft", method = "auto")
+
+# just a backup just in case anything wonky happens
+#saveRDS(guide, file = "/users/mimann/xena-scratch/guidance/guidance_run_backup.rds")
+
+write.csv(rGUIDANCE::scores(guide, "column"), "test_set_18S_guidanceMSA.MAFFT.Guidance2_res_pair_col.scr.csv")
+
+write.FASTA(guide@msa, "test_set_18S_guidance_msa_output.fasta")
+```
+
+
+
+score corrector is a function to clean up the guidance2 results. 
+It will allow me to merge LSU and SSU results afterwards easily.
+weights gives the weight for everything and the in COL = original column (not useful after this tbh)
+RES_PAIR_COLUMN_SCORE = weights used for raxml-ng.
+
+the Alignment tibble is the alignment used.
+```{r process guidance weights results}
+score_corrector <- function(scores_path, fasta_path, max_weight){
+  library(microseq)
+fasta <-  readFasta(fasta_path)
+
+scores <- 
+  read_csv(scores_path) %>%
+  select(column.col, column.score) %>%
+  rename(COL = column.col, 
+         RES_PAIR_COLUMN_SCORE= column.score)
+
+# adding in implied zeros so nothing gets confused 
+zero_cols_missing <- data.frame(COL = 1:nchar(fasta[1,2]), 
+                               RES_PAIR_COLUMN_SCORE = 0)
+
+# find columns missing with antijoin and then add rows back in with bind_rows
+# i dropped the values to 50 so the dataset would be smaller
+corrected_weights <- 
+  zero_cols_missing %>%
+  anti_join(scores, by = "COL") %>%
+  bind_rows(scores) %>%
+  arrange(COL) %>%
+  mutate(RES_PAIR_COLUMN_SCORE = round(RES_PAIR_COLUMN_SCORE * max_weight))  
+
+
+
+
+
+#### Cleaning up fasta ###
+index_residues <- 
+  corrected_weights %>%
+  pull(RES_PAIR_COLUMN_SCORE) > 0 # need to drop these from the alignment
+
+# clean up each seq by index
+index_puller <- function(string, index){
+  string[index]
+}
+
+corrected_weights_no_zeros <- 
+  corrected_weights %>%
+  filter(RES_PAIR_COLUMN_SCORE > 0)
+
+# remove empty 
+seqs_clean <- 
+  fasta$Sequence %>%
+  str_extract_all(boundary("character")) %>% # break it down into each character is an index
+  map(.f = index_puller, index = index_residues) %>% # subset and remove zeros
+  map(.f = paste, sep = "", collapse = "")   %>% # paste it together
+  as_vector()
+
+
+# cleaned up fasta ready for output
+
+list(weights = corrected_weights_no_zeros, 
+     Alignment = tibble(Header = fasta$Header, 
+                    Sequence = seqs_clean)
+     )
+
+}
+
+corrected_scores_LSU <- 
+  score_corrector(scores_path = "Test_Set/guidance/LSU/test_set_28S_guidanceMSA.MAFFT.Guidance2_res_pair_col.scr.csv", 
+                fasta_path = "Test_Set/guidance/LSU/test_set_28S_guidance_msa_output.fasta", 
+                max_weight = 10)
+
+
+```
+
+
+Merge and create files for partitionfinder2
+```{r merge SSU and SSU}
+# create file for weights
+
+
+
+# merging weights
+ weights %>%
+  pull(RES_PAIR_COLUMN_SCORE) %>%
+  paste(sep = "", collapse =" ")
+```
+python /users/mimann/partitionfinder-2.1.1/PartitionFinder.py -h
+ --raxml 
+ 
+ 
+ 
+
+

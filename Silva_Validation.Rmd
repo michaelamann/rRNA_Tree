@@ -21,7 +21,8 @@ silva_lsu <- read_csv("Silva_Validation/LSU/arb-silva.de_align_resultlist_116829
 ```
 
 # reblasting everything with a quality below 50. The really low quality ones need to be removed or cleaned but once you get to the 40s, it seems real.
-
+No issues with LSU sequences. 
+SAVING THE CLEANED VERSIONS IN THE TEST_SET FOLDER
 ```{r explore}
 
 
