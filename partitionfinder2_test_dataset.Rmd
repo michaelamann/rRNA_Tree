@@ -1,0 +1,44 @@
+---
+title: "Partitionfinder2_test_set"
+author: "Michael Mann"
+date: "6/2/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
+Creating cfg file to set parameters for partitionfinder2. Runnign models used for raxml
+
+```{bash data_block}
+## ALIGNMENT FILE ##
+alignment = SSU_LSU_alignment.phy;
+
+branchlengths = linked;
+models = GTR, GTR+G, GTR+I+G;
+model_selection = aicc;
+
+[data_blocks]
+SSU = 1-5058;
+LSU = 5059-12985;
+
+[schemes]
+search=greedy;
+```
+
+```{bash slurm job}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=PF2
+#SBATCH --partition=bigmem-1TB
+source activate partitionFinder
+
+cd /users/mimann/xena-scratch/test_set/partitionfinder2
+
+# run partitionfinder2 using cfg parameters
+python /users/mimann/partitionfinder-2.1.1/PartitionFinder.py -p -1
+
+```

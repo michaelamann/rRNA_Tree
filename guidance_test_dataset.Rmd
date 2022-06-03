@@ -10,6 +10,7 @@ Taking output and plugging it into partitionfinder2
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(microseq)
+#library(phylotools)
 ```
 
 slurm job run on xena at
@@ -140,6 +141,10 @@ corrected_scores_LSU <-
                 fasta_path = "Test_Set/guidance/LSU/test_set_28S_guidance_msa_output.fasta", 
                 max_weight = 10)
 
+corrected_scores_SSU <- 
+  score_corrector(scores_path = "Test_Set/guidance/SSU/test_set_18S_guidanceMSA.MAFFT.Guidance2_res_pair_col.scr.csv", 
+                fasta_path = "Test_Set/guidance/SSU/test_set_18S_guidance_msa_output.fasta", 
+                max_weight = 10)
 
 ```
 
@@ -147,18 +152,33 @@ corrected_scores_LSU <-
 Merge and create files for partitionfinder2
 ```{r merge SSU and SSU}
 # create file for weights
-
-
-
-# merging weights
- weights %>%
+corrected_scores_SSU$weights %>%
+  bind_rows(corrected_scores_LSU$weights) %>%
   pull(RES_PAIR_COLUMN_SCORE) %>%
-  paste(sep = "", collapse =" ")
-```
-python /users/mimann/partitionfinder-2.1.1/PartitionFinder.py -h
- --raxml 
- 
- 
- 
+  paste(sep = "", collapse =" ") %>%
+  write.table(file = "Test_Set/prelim_parse/weights.txt", col.names = F, row.names = F, quote = F)
 
+# length of SSU alignment is 5058 bases. 
+# need to know for partitionfinder2
+corrected_scores_SSU$Alignment$Sequence[[1]] %>% nchar()
+
+# merge fasta files
+corrected_scores_SSU$Alignment %>%
+  rename(SSU = Sequence) %>%
+  left_join(corrected_scores_LSU$Alignment,  by = "Header") %>%
+  rename(LSU = Sequence) %>%
+  mutate(Sequence = paste0(SSU, LSU)) %>%
+  select(Header, Sequence) %>%
+  writeFasta("Test_Set/prelim_parse/SSU_LSU_alignment.fasta")
+
+# converted the file to phylip using Aliview (phylotools wasnt working for some reason)
+ 
+ 
+```
+
+
+ 
+ 
+ 
+```{}
 
