@@ -35,3 +35,27 @@ raxml-ng --all --msa T1.raxml.rba --threads 64 --outgroup Phylogenomic_Ichthyoph
 
 1556
 enerating 10 parsimony starting tree(s) with 1813 taxa
+
+
+
+```{bash raxml_wheeler_mpi}
+#!/bin/bash
+#SBATCH -N 14
+#SBATCH --ntasks=8
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=raxml
+
+
+source activate raxml_ng_install
+
+/users/mimann/Test_set_raxml
+
+# clean up alignment
+raxml-ng-mpi --parse --msa SSU_LSU_alignment.phy --model GTR+I+G --prefix T1 --site-weights weights.txt --model partition.txt
+
+# run everything
+raxml-ng-mpi --all --msa T1.raxml.rba --threads 8 --outgroup Phylogenomic_Ichthyophonus_hoferi --model GTR+I+G --tree pars{10} --bs-trees 100 --tree-constraint constraint_tree_no_redundant_taxa.tree --bs-metric TBE 
+
+
+```

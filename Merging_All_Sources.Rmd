@@ -143,6 +143,11 @@ merged_chosen_read <-
   mutate(map_df(data, choosing_read_merged)) %>%
   select(-data) 
   
+merged_chosen_read %>%
+  write_csv("Completed_Reads/Final_Merged/merged_chosen_read_metadata.csv") 
+
+
+
 
 merged_chosen_read_wide <- 
   merged_chosen_read %>%
