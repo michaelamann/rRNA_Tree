@@ -7,8 +7,7 @@ output: html_document
 
 Compiling the accessions for each of the sequences used 
 and information on how those sequences were used. 
-
-
+just checking if i can update this file using git on rstudio. 
 
 ```{r read in data}
 
