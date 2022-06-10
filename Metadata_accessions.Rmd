@@ -147,9 +147,8 @@ strain_accessions <-
 
 ```
 
-
+_
 ```{r matching up chosen reads with accessions}
-
 all_accessions <- 
   metaxa2 %>%
   bind_rows(alignment_accessions) %>%
