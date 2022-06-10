@@ -431,6 +431,8 @@ chosen_reads <-
   mutate(map_df(best_reads, region_recovered))
 
 
+
+
 # swapping out read function depending on what i want to see
 # this is seeing ones that span the pacbio region
 cleaned_SSU_LSU_stats %>%
