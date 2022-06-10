@@ -1,0 +1,171 @@
+---
+title: "Sequence_metadata"
+author: "Michael Mann"
+date: "6/9/2022"
+output: html_document
+---
+
+Compiling the accessions for each of the sequences used 
+and information on how those sequences were used. 
+
+
+
+```{r read in data}
+
+### metadata for metaxa2
+# originally includes 5.8S from intial ITSx but leaving it out for the paper.
+metaxa2 <- 
+  read_csv("/Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/metdata_test.csv") %>%
+  filter(source == "metaxa2") %>%
+  select(Assembly, contig, Region) %>%
+  mutate(Region = case_when(Region == "SSU" ~ "r18S", 
+                            Region == "LSU" ~ "r28S")) %>%
+  rename(Accession = contig)  %>%
+  rename(Genome = Assembly) %>%
+  mutate(Data_Source = "Metaxa2")
+  
+
+# chosen reads used. 
+merged_chosen_read  <- 
+  read_csv("Completed_Reads/Final_Merged/merged_chosen_read_metadata.csv") %>%
+  filter(Region %in% c("r18S", "r28S"))
+
+```
+
+```{r extract accessions from alignments}
+
+# this function takes each alignment and extracts the accessions used to make the reads in the tree. I notated each wiht what region so i can extract htat info here as well. Since these were often assembled, I had to use multiple contigs to cover them. I also used closely related sequences as a reference which I note here as well. 
+accession_extraction_alignments <- function(path){
+    
+    readFasta(
+      paste0("Manual_Build/Alignments/", path)) %>%
+      filter(str_detect(Header, pattern = "blank", negate = T)) %>% 
+      mutate(Region = case_when(str_detect(Header, "Reference") ~ "Reference",
+                                str_detect(Header, "18S") ~ "18S")) %>%
+      mutate(Region_2 = case_when(str_detect(Header, "28S") ~ "28S")) %>% 
+      pivot_longer(cols = c(Region, Region_2), names_to = "Junk", values_to = "Region") %>%
+      drop_na(Region) %>%
+      select(-Junk) %>%
+      mutate(Accession = str_remove(Header, pattern = ":.*")) %>%
+      mutate(Accession = str_remove(Accession, pattern = " .*")) %>%
+      mutate(Accession = str_remove(Accession, pattern = "_FRAGMENT.*")) %>% # cleans up one sample
+      select(Accession, Region)
+  
+}
+
+
+# these qere the sequences for the genomes I figured out the regions by hand. Usually hads gaps so had to do manually.
+genomes_hand <-  
+  tibble(path = list.files("Manual_Build/Clean_Assembled/Assembled_Hand/Congregated")) %>%
+  filter(path != "Assembled_Hand_58S.fasta") %>%
+  mutate(full_path = paste0("Manual_Build/Clean_Assembled/Assembled_Hand/Congregated/", path)) %>%
+  mutate(Fasta = map(full_path, readFasta)) %>%
+  unnest(Fasta) %>%
+  mutate(Region = str_extract(path, "(?<=nd_).8S(?=.fasta)")) %>%
+    select(-Sequence, -full_path, -path) %>%
+  mutate(Manual_Type = "Hand") %>%
+  rename(Genome = Header)
+  
+
+# these were the ones processed with ITSx to separate them into regions. 
+geomes_itsxgood <- 
+  tibble(path = list.files("/Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/Manual_Build/Clean_Assembled/ITSx_Manual_Build/Renamed")) %>%
+  filter(path != "Assembled_ITSxgood_58S.fasta") %>%
+  mutate(full_path = paste0("/Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/Manual_Build/Clean_Assembled/ITSx_Manual_Build/Renamed/", path)) %>%
+  mutate(Fasta = map(full_path, readFasta)) %>%
+  unnest(Fasta) %>%
+  select(-full_path, -Sequence) %>%
+  mutate(Region = str_extract(path, "(?<=good_).8S(?=.fasta)")) %>%
+  mutate(Genome = str_extract(Header, "GCA_.*\\.[:digit:]")) %>%
+  select(Genome, Region) %>%
+  mutate(Manual_Type = "ITSxgood")
+
+  
+# merge them into one so i can do a join operation
+Manual_type_df <- 
+  genomes_hand %>%
+  bind_rows(geomes_itsxgood) %>%
+  mutate(Region = paste0("r", Region))
+  
+  
+
+
+
+
+
+# this has sequences cleaned by hand and by ITSxgood. The ones that were continous went to ITSx while the others were split by hand. 
+alignment_accessions <- 
+  tibble(path = list.files("Manual_Build/Alignments")) %>%
+  mutate(Genome = str_extract(string = path, pattern = "GCA_.*\\.[:digit:](?=_)")) %>%
+  mutate(accessions_nested = map(path, .f = accession_extraction_alignments)) %>%
+  unnest(accessions_nested) %>% 
+  drop_na() %>% # removing blanks, primers used in alignment. 
+  mutate(Region = case_when(str_detect(Region, "8S") ~ paste0("r", Region),
+                            TRUE ~ paste0(Region)))  %>% # add r's only to 18S and 28S so it matches chosen read dataset
+  mutate(Data_Source = "Manual") %>%
+  full_join(Manual_type_df, by = c("Genome", "Region")) %>%
+  select(-path) %>%
+  mutate(Manual_Type = case_when(Manual_Type == "ITSxgood" ~ "ITSxgood", 
+                          Manual_Type == "Hand" ~ "Hand", 
+                          Region == "Reference" ~ "Reference"))
+  
+  
+  
+  
+  
+  
+
+
+           
+```
+
+
+
+
+
+```{r extract accessions from strain sequence fasta}
+# extracting accessions for each of the sequences that were used as a strain ID. these were not from the genomes but strain matches. 
+accession_extraction_strains <- function(path){
+  
+  readFasta(paste0("Manual_Build/Clean_Assembled/Assembled_Strain/Congregated/", path)) %>%
+    mutate(Accession = str_remove(Header, pattern = " .*")) %>%
+    select(Accession) %>%
+    separate(Accession, into = c("Genome", "Accession"), sep = "-")
+  
+}
+
+strain_accessions <- 
+  tibble(path = list.files("Manual_Build/Clean_Assembled/Assembled_Strain/Congregated")) %>%
+  filter(path != "Assembled_Strain_58S.fasta") %>%
+  mutate(accessions_nested = map(path, accession_extraction_strains)) %>%
+  mutate(Region = str_extract(path, "(?<=n_).*(?=.fasta)"))  %>%
+  unnest(accessions_nested) %>%
+  select(-path) %>%
+  mutate(Region = paste0("r", Region)) %>% # add r's to 18S and 28S so it matches
+  mutate(Data_Source = "Manual") %>%
+  mutate(Manual_Type = "Strain")
+
+```
+
+
+```{r matching up chosen reads with accessions}
+
+all_accessions <- 
+  metaxa2 %>%
+  bind_rows(alignment_accessions) %>%
+  bind_rows(strain_accessions) %>%
+  distinct() # remove any duplicate rows. This coudl be due to two different regions of teh same accession on two different lines of the alignments. 
+ 
+
+
+
+
+merged_chosen_read %>%
+  full_join(all_accessions, by = c("Genome", "Region", "Data_Source", "Manual_Type")) %>%
+  drop_na(Sequence) %>% # only want ones used for tree
+  View()
+
+
+
+
+```
