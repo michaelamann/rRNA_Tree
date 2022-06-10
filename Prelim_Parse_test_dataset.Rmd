@@ -1,0 +1,62 @@
+---
+title: "Prelim_Parse_test_dataset"
+author: "Michael Mann"
+date: "6/3/2022"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(microseq)
+#library(phylotools)
+#library(ape)
+```
+
+
+prelim.slurm
+```{bash slurm script}
+#!/bin/bash
+#SBATCH --ntasks=32
+#SBATCH --mem=0
+#SBATCH --time=2:00:00
+#SBATCH --job-name=prelim
+#SBATCH --partition=bigmem-1TB
+
+source activate raxml_ng_install
+
+cd /users/mimann/xena-scratch/test_set/raxml/prelim_parse
+
+# checking for duplicates
+raxml-ng --parse --msa SSU_LSU_alignment.phy --model GTR+I+G --prefix T1 --site-weights weights.txt
+
+
+```
+
+```{r create constraint tree}
+
+phylogenomic_tree <- ape::read.nexus("1672taxa_29genes_bb1_1.nexus")
+
+# to differentiate, i am adding the Phylogenomic_ label to each taxon. 
+# cleaning up the tree file names so the names match wiht the fasta file
+phylogenomic_tree$tip.label <- 
+  paste0("Phylogenomic_", phylogenomic_tree$tip.label) %>%
+  str_replace_all(pattern = "'", replacement = "") %>% # some of the strain species names had extra symbols. I removed them.
+  str_replace_all(pattern = "-", replacement = "") # some of the strain species names had extra symbols. I removed them.
+
+
+# reading in alignment with only the phylogenomic tips i want to include. 
+reduced_alignment <- phylotools::read.phylip("Test_Set/prelim_parse/T1.raxml.reduced.phy", clean_name = FALSE)
+
+
+tips_to_include <- 
+  tibble(tips = reduced_alignment$seq.name) %>%
+  filter(str_detect(tips, pattern = "Phylogenomic_")) %>%
+  pull(tips)
+
+tree_reduced <- ape::keep.tip(phylogenomic_tree, tips_to_include)
+
+
+ape::write.tree(tree_reduced, "Test_Set/raxml_run/constraint_tree_no_redundant_taxa.tree")
+
+```
