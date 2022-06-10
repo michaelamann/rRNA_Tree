@@ -9,6 +9,12 @@ Compiling the accessions for each of the sequences used
 and information on how those sequences were used. 
 just checking if i can update this file using git on rstudio. 
 
+```{r read in packaget}
+library(tidyverse)
+library(microseq)
+```
+
+
 ```{r read in data}
 
 ### metadata for metaxa2
@@ -161,7 +167,7 @@ all_accessions <-
 merged_chosen_read %>%
   full_join(all_accessions, by = c("Genome", "Region", "Data_Source", "Manual_Type")) %>%
   drop_na(Sequence) %>% # only want ones used for tree
-  View()
+  write_csv("Metadta_Accessions.csv")
 
 
 

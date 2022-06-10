@@ -263,7 +263,7 @@ merge_tibbles <- function(SSU, LSU){
 }
 
 
-# Figure out warnings and make sure it is properly following conditional statements
+
 cleaned_SSU_LSU <- 
   summary_table %>%
   mutate(Assembly = str_extract(genome, pattern = "GCA_.*\\.[:digit:](?=_)")) %>%
@@ -279,8 +279,7 @@ cleaned_SSU_LSU <-
 # match taxonomy with genbank and the hits
 # spans regions
 # Length excluding ambiguous bases
-taxonomy_read_length_stats <- 
-  function(NCBI_Phylum, NCBI_Order, NCBI_Family, NCBI_Genus, final_merged){
+taxonomy_read_length_stats <- function(NCBI_Phylum, NCBI_Order, NCBI_Family, NCBI_Genus, final_merged){
     
     
     # need conditional because some are not dataframes and it will break
@@ -309,7 +308,7 @@ cleaned_SSU_LSU_stats <-
 write_rds(x = cleaned_SSU_LSU_stats, file = "cleaned_SSU_LSU_stats.rds")
 ```
 
-
+# don't need this part. I did this to rerun all potential contigs through ITSx to extract other regions. 
 I am runing ITSx on all of the contigs recovered.
 ```{r create ITS contigs}
 ### ITSx_contigs
