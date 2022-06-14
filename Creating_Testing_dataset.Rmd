@@ -123,14 +123,228 @@ test_set_merged %>%
 
 
 
-
 test_set_merged %>%
   select(Header, LSU) %>%
   rename(Sequence = LSU) %>%
   bind_rows(phylogenomic_LSU) %>%
   mutate(Sequence = str_remove_all(Sequence, "-")) %>%
   writeFasta("Test_Set/test_set_28S.fasta")
+```
 
+
+creating join metadata file so i can analyze how the species were placed onto the same tree. 
+going to use genabnk to arbritate taxonomy.
+cleaning up TBAS. 
+```{r read in genbank accessions}
+# this is how i am getting up to date NCBI taxonomy
+library(taxize)
+
+# read in the data
+tbas_metadata <- read_csv("T_BAS_2022/Pezinomycotina/voucher (2).csv")
+
+
+
+# using this to subset the list to get the uid from the output
+extract_uid <- function(dat){
+  dat[[1]][[1]]
+}
+
+# this is needed to pull out the classification from the output
+extract_classification <- function(dat){
+  dat[[1]] %>%
+    as.tibble()
+  
+}
+
+# this funciton cleans up taxize data into a wide data form so i can 
+accession_to_taxonomy <- function(dat){
+  
+  dat %>%
+    select(Region, Accessions) %>%
+    mutate(uid = map(Accessions, genbank2uid, key = "916430fc4912dde71d2b924cd447b704d808")) %>%
+    mutate(uid = map_chr(uid, extract_uid)) %>%
+    distinct(uid) %>%
+    mutate(classification = map(uid, classification, db = "ncbi", key = "916430fc4912dde71d2b924cd447b704d808")) %>%
+    mutate(classification = map(classification, extract_classification)) %>%
+    unnest(classification) %>%
+    select(-id) 
+    
+}
+  
+# using this to reduce the dataset to query from ncbi since it takes forever
+tbas_selected <- 
+  asco_set %>%
+  select(Header) %>%
+  mutate(Header = str_remove(Header, "TBAS_")) %>%
+  pull(Header)
+  
+
+library(furrr)
+# set up parallelization
+plan(multisession, workers = 6)
+
+# using this key. pls dont steal..
+key <-  "916430fc4912dde71d2b924cd447b704d808"
+
+
+# adding ncbi taxonomy to tbas sequences
+tbas_metadata_clean <-
+  tbas_metadata %>%
+  filter(Strain_name %in% tbas_selected) %>%
+  pivot_longer(cols = c(GB_RPB1, GB_mitSSU, GB_ITS, GB_nucSSU, GB_nucLSU, GB_RPB2), names_to = "Region", values_to = "Accessions") %>%
+  filter(Accessions != "unavailable") %>%
+  filter(Accessions != "James_et_al_2006") %>% # this messes up genbank2uid
+  filter(Accessions != "RS/AAEC0200") %>%
+  group_by(Strain_name, Phylum, subClass, Class, Family,subPhylum, Order, Genus) %>%
+  nest() %>% 
+  mutate(taxonomy = future_map(data, accession_to_taxonomy))
+
+
+
+# main disagreements are in Saccharomycetes which arent a concern for this project.
+# using ncbi for everything except species call so the names still match up to tree. No disagreements there
+tbas_metadata_final <- 
+  tbas_metadata_clean %>%
+  unnest(taxonomy) %>%
+  ungroup() %>%
+  select(-data) %>%
+  filter(rank %in% c("kingdom", "phylum", "class", "order", "family", "genus", "species")) %>%
+  pivot_wider(names_from = rank, values_from = name)  %>%
+  drop_na(kingdom) %>% # drops some random bacteria sequences
+  select(-uid, -species) %>%
+  distinct() %>%
+  filter(genus != "Clohesyomyces") %>% # dropping this one since it doesnt match the genus Only disagreement that isnt species or UID.
+  add_count(Strain_name) %>%
+  select(kingdom, phylum, class, order, family, genus, Strain_name) %>%
+  rename(Species = Strain_name) %>%
+  mutate(phylo_tip = paste0("TBAS_", Species)) %>%
+  mutate(dataset = "TBAS_Pezizomycotina_V2_1")
+```
+
+
+```{r cleaning up names for basidios}
+# read in metadata that has all the accessions
+basidios <- read_csv("Sanchez_Garcia_Agaricomycetes_Tree/Data manuscript/Table_S1.csv")
+
+# pull out basidios that i am planning on using to limit the size of the dataset
+agarico_selected <-
+  agarico_set %>%
+  select(Header) %>%
+  mutate(Header = str_remove(Header, "Agarico_")) %>%
+  pull(Header)
+
+
+
+
+
+agaricos_clean <- 
+  basidios %>%
+  rename(Species = `Taxon name based on GenBank`) %>%
+  filter(Species %in% agarico_selected) %>%
+  pivot_longer(cols = c(nrLSU, nrSSU, rpb1, rpb2, tef1), names_to = "Region", values_to = "Accessions") %>%
+  drop_na() %>% # remove ones that are missing
+  group_by(Species) %>%
+  nest() %>%
+  mutate(taxonomy = future_map(data, accession_to_taxonomy)) # add ncbi taxonomy here
+
+
+
+# there are mismatches in the genera and the names of taxa in the tree. For the most part its not too important for this tree as I am more interested in getting the 
+# families right. But important to keep in mind. Agaricales_sp_3034_1 seemed more likely not to be in teh genus it was also listed in. That is the reason for the 
+# complex filtering step.
+
+agaricos_metadata_final <- 
+  agaricos_clean %>%
+  unnest(taxonomy) %>%
+  ungroup() %>%
+  select(-data) %>%
+  filter(rank %in% c("kingdom", "phylum", "class", "order", "family", "genus", "species")) %>%
+  pivot_wider(names_from = rank, values_from = name)  %>%
+  drop_na(kingdom) %>% # drops some random bacteria sequences
+  select(-uid, -species) %>%
+  distinct() %>%
+  add_count(Species) %>%
+  mutate(match = str_detect(Species, genus)) %>%
+  filter(n == 1 | n == 2 & match == TRUE | Species == "Agaricales_sp_3034_1" & is.na(match)) %>% # trying to choose one taxonomy for each taxon. This clears it up. 
+  select(kingdom, phylum, class, order, family, genus, Species) %>%
+  mutate(phylo_tip = paste0("Agarico_", Species))  %>%
+  mutate(dataset = "Sanchez_Garcia_Agaricomycetes")
 
 ```
 
+
+
+```{r phylogenomic tree}
+# given this came from ncbi i am pretty sure these should match but for consistency i will run them as well. 
+
+# get tip names from tree for phylogenomic
+
+Phylogenomic_selected <- 
+  microseq::readFasta("Test_Set/prelim_parse/SSU_LSU_alignment.fasta") %>%
+  filter(str_detect(Header, "Phylogenomic")) %>%
+  mutate(Header = str_remove(Header, "Phylogenomic_")) %>%
+  select(-Sequence) %>%
+  mutate(phylo_tip = Header) %>%
+  mutate(
+    Header = 
+      case_when(Header == "Curvularia_sp._IFBZ10" ~ "Curvularia_sp._IFB-Z10", 
+                Header == "Paraphoma_sp._B479" ~ "Paraphoma_sp._B47-9",
+                Header == "Ophiostoma_novoulmi" ~ "Ophiostoma_novo-ulmi",
+                Header == "Tolypocladium_sp._Sup5_PDA1" ~ "Tolypocladium_sp._Sup5_PDA-1",
+                Header == "Tolypocladium_sp._Salcha_MEA2" ~ "Tolypocladium_sp._Salcha_MEA-2",
+                Header == "Pseudogymnoascus_sp._VKM_F3557" ~ "Pseudogymnoascus_sp._VKM_F-3557",
+                Header == "Pseudogymnoascus_sp._VKM_F3775" ~ "Pseudogymnoascus_sp._VKM_F-3775",
+                Header == "Pseudogymnoascus_sp._VKM_F4246" ~ "Pseudogymnoascus_sp._VKM_F-4246",
+                Header == "Pseudogymnoascus_sp._VKM_F4518_FW2643" ~ "Pseudogymnoascus_sp._VKM_F-4518_FW-2643",
+                Header == "Ophiocordyceps_polyrhachisfurcata" ~ "Ophiocordyceps_polyrhachis-furcata",
+                Header == "Aureobasidium_sp._FSWF84" ~ "Aureobasidium_sp._FSWF8-4",
+                Header == "Gaeumannomyces_sp._JS464" ~ "Gaeumannomyces_sp._JS-464",
+                Header == "Raffaelea_quercusmongolicae" ~ "Raffaelea_quercus-mongolicae",
+                Header == "Cordyceps_sp._RAO2017" ~ "Cordyceps_sp._RAO-2017",
+                Header == "Ophiocordyceps_camponotirufipedis" ~ "Ophiocordyceps_camponoti-rufipedis",
+                Header == "Zasmidium_citrigriseum" ~ "Zasmidium_citri-griseum",
+                Header == "Verticillium_alboatrum" ~ "Verticillium_albo-atrum",
+                Header == "Rutstroemia_sp._NJR2017a_WRK4" ~ "Rutstroemia_sp._NJR-2017a_WRK4",
+                Header == "Rutstroemia_sp._NJR2017a_BVV2" ~ "Rutstroemia_sp._NJR-2017a_BVV2",
+                Header == "Rutstroemia_sp._NJR2017a_BBW" ~ "Rutstroemia_sp._NJR-2017a_BBW",
+                Header == "Ophiognomonia_clavigignentijuglandacearum" ~ "Ophiognomonia_clavigignenti-juglandacearum",
+                Header == "Lecanicillium_sp._MT2017a" ~ "Lecanicillium_sp._MT-2017a",
+                Header == "Colletotrichum_sp._JS367" ~ "Colletotrichum_sp._JS-367",
+                Header == "Blastomyces_sp._MA2018" ~ "Blastomyces_sp._MA-2018",
+                Header == "Pyrenophora_triticirepentis" ~ "Pyrenophora_tritici-repentis",
+                Header == "Ophiocordyceps_sp._camponotisaundersi" ~ "Ophiocordyceps_sp._camponoti-saundersi",
+                Header == "Ophiocordyceps_sp._camponotileonardi" ~ "Ophiocordyceps_sp._camponoti-leonardi", 
+                TRUE ~ as.character(Header))) %>%
+  rename(old_taxonID_linked_genome_sequence = Header)
+
+
+genomes_metadata <- read_csv("genomes_metadata.csv")
+
+# matching them up and filtering to just the tips used
+genomes_metadata_filtered <- 
+  genomes_metadata %>%
+  full_join(Phylogenomic_selected, by = "old_taxonID_linked_genome_sequence") %>%
+  drop_na(phylo_tip) %>%
+  select(Order_id, old_taxonID_linked_genome_sequence, NCBI_Species_Strain, NCBI_Strain, NCBI_Species_Name, 
+         NCBI_Genus, NCBI_Family, NCBI_Order, NCBI_Class, NCBI_Phylum, NCBI_Kingdom, phylo_tip) %>%
+  rename(
+    Species = NCBI_Species_Name, 
+    genus =  NCBI_Genus, 
+    family = NCBI_Family, 
+    order = NCBI_Order, 
+    class = NCBI_Class, 
+    phylum = NCBI_Phylum, 
+    kingdom = NCBI_Kingdom) %>%
+  mutate(dataset = "Phylogenomic_Tree")
+  
+
+### WRITING IT ALL TO FILE ###
+## MERGED TAXONOMY FOR ALL THREE DATASETS USING NCBI ##
+tbas_metadata_final %>%
+  bind_rows(agaricos_metadata_final) %>%
+  bind_rows(genomes_metadata_filtered) %>%
+  rename(species = Species) %>%
+  write_csv("Test_Set/Test_Dataset_taxonomy.csv")
+
+
+```
