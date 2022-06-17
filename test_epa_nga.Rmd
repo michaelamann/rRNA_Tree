@@ -1,0 +1,204 @@
+---
+title: "test_epa_ng"
+author: "Michael Mann"
+date: '2022-06-15'
+output: html_document
+---
+
+My first pass wiht the full tree had low support. 
+Going to try a few things:
+use EPA to place phylogenomic taxa onto AFTOL tree to make sure everything looks right. 
+
+Then once that passes I will run the test dataset and place those on the phylogenomic tree.
+
+loading librarites
+```{r libraries}
+library(tidyverse)
+library(microseq)
+```
+
+
+
+```{r AFTOL tree}
+tree <- ape::read.tree("AFTOL/AFTOL_tree.tre")
+```
+
+
+AFTOL SSU
+```{r creaitng alignment for AFTOL test}
+
+SSU_Alignment <- readFasta("Test_Set/prelim_parse/SSU_alignment.fasta")
+
+
+# AFTOL seqs misssing from tree. 
+missing_seqs <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(SSU_Alignment, by = "Header") %>%
+  replace_na(list(Sequence = "missing")) %>%
+  filter(str_detect(string = Header, pattern = "Phylogenomic_", negate = T)) %>%
+  filter(Sequence == "missing") %>%
+  pull(Header)
+
+# create a tree that will work for raxml (dropped three tips)
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs), file = "Test_Set/epa_ng/AFTOL_test/SSU/AFTOL_tree_SSU_epa_ng.tre")
+
+
+
+
+
+# create reference alignment 
+SSU_Alignment %>%
+  filter(str_detect(Header, pattern = "TBAS") | 
+         str_detect(Header, pattern = "Phylogenomic") |
+         str_detect(Header, pattern = "Agarico")) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_query.fasta")
+
+
+# create query
+SSU_Alignment %>%
+  filter(str_detect(Header, pattern = "TBAS", negate = TRUE) & 
+         str_detect(Header, pattern = "Phylogenomic", negate = TRUE) &
+         str_detect(Header, pattern = "Agarico", negate = TRUE)) %>%
+  mutate(presence_tree = case_when(Header %in% tree$tip.label ~ "Present", TRUE ~ "Missing")) %>%
+  filter(presence_tree == "Present") %>% # dropping some microsporidia
+  select(-presence_tree) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_reference.fasta")
+
+
+```
+
+
+
+
+
+
+
+```{r LSU dataset}
+LSU_Alignment <- readFasta("Test_Set/prelim_parse/LSU_alignment.fasta")
+
+# AFTOL seqs misssing from tree. 
+missing_seqs_LSU <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(SSU_Alignment, by = "Header") %>%
+  replace_na(list(Sequence = "missing")) %>%
+  filter(str_detect(string = Header, pattern = "Phylogenomic_", negate = T)) %>%
+  filter(Sequence == "missing") %>%
+  pull(Header)
+
+# create a tree that will work for raxml (dropped three tips)
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs_LSU), file = "Test_Set/epa_ng/AFTOL_test/LSU/AFTOL_tree_LSU_epa_ng.tre")
+
+
+# create reference alignment 
+LSU_Alignment %>%
+  filter(str_detect(Header, pattern = "TBAS") | 
+         str_detect(Header, pattern = "Phylogenomic") |
+         str_detect(Header, pattern = "Agarico")) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/LSU/lsu_query.fasta")
+
+
+# create query
+LSU_Alignment %>%
+  filter(str_detect(Header, pattern = "TBAS", negate = TRUE) & 
+         str_detect(Header, pattern = "Phylogenomic", negate = TRUE) &
+         str_detect(Header, pattern = "Agarico", negate = TRUE)) %>%
+  mutate(presence_tree = case_when(Header %in% tree$tip.label ~ "Present", TRUE ~ "Missing")) %>%
+  filter(presence_tree == "Present") %>% # dropping some microsporidia
+  select(-presence_tree) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/LSU/lsu_reference.fasta")
+
+```
+
+
+
+
+Jobs to run epa-ng
+
+
+```{bash AFTOL_best_tree_search_SSU}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=30:00:00
+#SBATCH --job-name=best_tree
+#SBATCH --partition=bigmem-3TB
+
+source activate raxml_ng_install
+
+cd xena-scratch/test_set/epa_ng/AFTOL/SSU 
+
+
+cat ssu_query.fasta  ssu_reference.fasta > ssu_seqs.fasta
+
+raxml-ng --parse --msa ssu_seqs.fasta --model GTR+I+G --prefix T1 --site-weights SSU_weights.txt
+
+# run everything
+raxml-ng --search --msa T1.raxml.rba --outgroup Phylogenomic_Ichthyophonus_hoferi --model GTR+I+G --tree pars{10}  --tree-constraint constraint_tree_no_redundant_taxa.tree  --prefix T2
+
+
+```
+
+
+
+```{bash AFTOL_test_SSU}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=SSU_AFTOL
+#SBATCH --partition=bigmem-3TB
+
+source activate epa-ng
+
+cd /users/mimann/xena-scratch/test_set/epa_ng/AFTOL/SSU
+--model GTR{0.7/1.8/1.2/0.6/3.0/1.0}+FU{0.25/0.23/0.30/0.22}+G4{0.47}
+epa-ng --ref-msa ssu_reference.fasta --tree AFTOL_tree_SSU_epa_ng.tre --query ssu_query.fasta --model GTR{1.1/3.1/1.1/0.9/4.7/1.0}+FC+G4m{0.7}+BU{0.9}
+````
+
+
+getting the model parameters for EPA-NG
+```{bash AFTOL_best_tree SSU}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=0:10:00
+#SBATCH --job-name=best_tree
+#SBATCH --partition=debug
+
+source activate raxml_ng_install
+
+cd /users/mimann/xena-scratch/test_set/epa_ng/AFTOL/SSU
+
+raxml-ng --parse --msa SSU_LSU_alignment.phy --model GTR+I+G --prefix T1 --site-weights weights.txt
+raxml-ng --search --msa T1.raxml.rba --outgroup Phylogenomic_Ichthyophonus_hoferi --model GTR+I+G --tree pars{10}  --tree-constraint constraint_tree_no_redundant_taxa.tree  --prefix T1
+
+```
+
+
+
+
+
+
+```{bash AFTOL_test LSU}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=LSU_AFTOL
+#SBATCH --partition=bigmem-3TB
+
+source activate epa-ng
+
+cd /users/mimann/xena-scratch/test_set/epa_ng/AFTOL/LSU
+
+epa-ng --ref-msa lsu_reference.fasta --tree AFTOL_tree_LSU_epa_ng.tre --query lsu_query.fasta --model GTR{0.9/3.3/1.4/0.8/7.4/1.0}+FC+G4m{0.5}+BU{1.0}
+```
+
+
+
+
+

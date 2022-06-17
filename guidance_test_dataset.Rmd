@@ -140,11 +140,27 @@ corrected_scores_LSU <-
   score_corrector(scores_path = "Test_Set/guidance/LSU/test_set_28S_guidanceMSA.MAFFT.Guidance2_res_pair_col.scr.csv", 
                 fasta_path = "Test_Set/guidance/LSU/test_set_28S_guidance_msa_output.fasta", 
                 max_weight = 10)
+writeFasta(corrected_scores_LSU$Alignment, "Test_Set/prelim_parse/LSU_alignment.fasta")
+
+corrected_scores_LSU$weights %>%
+  pull(RES_PAIR_COLUMN_SCORE) %>%
+  paste(sep = "", collapse =" ") %>%
+  write.table(file = "Test_Set/prelim_parse/LSU_weights.txt", col.names = F, row.names = F, quote = F) 
+
+
 
 corrected_scores_SSU <- 
   score_corrector(scores_path = "Test_Set/guidance/SSU/test_set_18S_guidanceMSA.MAFFT.Guidance2_res_pair_col.scr.csv", 
                 fasta_path = "Test_Set/guidance/SSU/test_set_18S_guidance_msa_output.fasta", 
                 max_weight = 10)
+writeFasta(corrected_scores_SSU$Alignment, "Test_Set/prelim_parse/SSU_alignment.fasta")
+
+
+
+corrected_scores_SSU$weights %>%
+  pull(RES_PAIR_COLUMN_SCORE) %>%
+  paste(sep = "", collapse =" ") %>%
+  write.table(file = "Test_Set/prelim_parse/SSU_weights.txt", col.names = F, row.names = F, quote = F) 
 
 ```
 
@@ -179,6 +195,3 @@ corrected_scores_SSU$Alignment %>%
 
  
  
- 
-```{}
-
