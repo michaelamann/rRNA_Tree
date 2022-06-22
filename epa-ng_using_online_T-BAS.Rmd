@@ -1,0 +1,63 @@
+---
+title: "Checking_test_set"
+author: "Michael Mann"
+date: '2022-06-21'
+output: html_document
+---
+Checking test set and phylogenomic with EPA-ng placement provided by T-BAS using the AFTOL tree. 
+Looking for taxa that aligned poorly or seem to be errors. 
+Runtime options
+
+info form the job:
+runnumber is: JBDTSRBW
+annotation is: EPA_using_fungal_reference_18S
+ladderize_option: ladderize
+unknown_fasta1 is test_set_18S_TBAS.fasta.
+Placement cutoff distance is skip.
+Placement program wall time is 168.0.
+BLAST filter run is none.
+Substitution model: GTRGAMMA.
+Generic parameter: noneselected.
+Phylogeny program: epang.
+Cluster on one locus (used only on multilocus): cluster_all.
+Data type is: DNA.
+Cluster program is: vsearch.
+similarity cutoff is auto.
+Add to OTUS is not checked.
+Placement option is likelihood.
+Outgroup is Monosiga_brevicollis, Caenorhabditis_elegans, Drosophila_melanogaster, Ciona_intestinalis, Homo_sapiens, Dictyostelium_discoideum, Cryptosporidium_parvum, Toxoplasma_gondii, Phytophthora_sojae, Thalassiosira_pseudonana, Cyanidioschyzon_merolae, Chlamydomonas_reinhardtii, Oryza_sativa, Arabidopsis_thaliana, Populus_trichocarpa
+Reference set is: Fungi
+Reference partitions is nucSSU
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+```
+
+
+```{r read in data}
+epa_placement_SSU <- read_csv("Test_Set/epa_ng/T-BAS_Online_check/SSU/tbas21_archiveJBDTSRBW_/assignments_reportJBDTSRBW.csv")
+epa_placement_LSU <- read_csv("Test_Set/epa_ng/T-BAS_Online_check/LSU/tbas21_archiveGUNJYJCA_/assignments_reportGUNJYJCA.csv")
+test_set_taxonomy <- read_csv("/Users/michaelmann/Dropbox/Masters_Program/Genomes_rRNA/Test_Set/Test_Dataset_taxonomy.csv")
+
+```
+
+
+```{r merge and view}
+
+
+epa_placement_LSU %>%
+  mutate(`Query sequence` = str_remove(`Query sequence`, "Phylogenomic_")) %>%
+  full_join(test_set_taxonomy, by = c(`Query sequence` = "phylo_tip")) %>%
+  mutate(Order_match =  `Order-level assignment` == order) %>%
+  write_csv("Test_Set/epa_ng/T-BAS_Online_check/LSU/merged_LSU_EPA-NG_test_set_taxonomy_mismatched_order.csv")
+
+
+epa_placement_SSU %>%
+  mutate(`Query sequence` = str_remove(`Query sequence`, "Phylogenomic_")) %>%
+  full_join(test_set_taxonomy, by = c(`Query sequence` = "phylo_tip")) %>%
+  mutate(Order_match =  `Order-level assignment` == order) %>%
+  write_csv("Test_Set/epa_ng/T-BAS_Online_check/SSU/merged_SSU_EPA-NG_test_set_taxonomy_mismatched_order.csv")
+
+```

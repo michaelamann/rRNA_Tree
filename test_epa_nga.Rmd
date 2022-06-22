@@ -50,17 +50,17 @@ ape::write.tree(
 
 # create reference alignment 
 SSU_Alignment %>%
-  filter(str_detect(Header, pattern = "TBAS") | 
-         str_detect(Header, pattern = "Phylogenomic") |
-         str_detect(Header, pattern = "Agarico")) %>%
+  filter(str_detect(Header, pattern = "TBAS_") | 
+         str_detect(Header, pattern = "Phylogenomic_") |
+         str_detect(Header, pattern = "Agarico_")) %>%
   writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_query.fasta")
 
 
 # create query
 SSU_Alignment %>%
-  filter(str_detect(Header, pattern = "TBAS", negate = TRUE) & 
-         str_detect(Header, pattern = "Phylogenomic", negate = TRUE) &
-         str_detect(Header, pattern = "Agarico", negate = TRUE)) %>%
+  filter(str_detect(Header, pattern = "TBAS_", negate = TRUE) & 
+         str_detect(Header, pattern = "Phylogenomic_", negate = TRUE) &
+         str_detect(Header, pattern = "Agarico_", negate = TRUE)) %>%
   mutate(presence_tree = case_when(Header %in% tree$tip.label ~ "Present", TRUE ~ "Missing")) %>%
   filter(presence_tree == "Present") %>% # dropping some microsporidia
   select(-presence_tree) %>%
@@ -82,7 +82,7 @@ LSU_Alignment <- readFasta("Test_Set/prelim_parse/LSU_alignment.fasta")
 missing_seqs_LSU <- 
   tibble(Header = tree$tip.label) %>%
   mutate(source = "tree") %>%
-  full_join(SSU_Alignment, by = "Header") %>%
+  full_join(LSU_Alignment, by = "Header") %>%
   replace_na(list(Sequence = "missing")) %>%
   filter(str_detect(string = Header, pattern = "Phylogenomic_", negate = T)) %>%
   filter(Sequence == "missing") %>%
@@ -95,9 +95,9 @@ ape::write.tree(
 
 # create reference alignment 
 LSU_Alignment %>%
-  filter(str_detect(Header, pattern = "TBAS") | 
-         str_detect(Header, pattern = "Phylogenomic") |
-         str_detect(Header, pattern = "Agarico")) %>%
+  filter(str_detect(Header, pattern = "TBAS_") | 
+         str_detect(Header, pattern = "Phylogenomic_") |
+         str_detect(Header, pattern = "Agarico_")) %>%
   writeFasta("Test_Set/epa_ng/AFTOL_test/LSU/lsu_query.fasta")
 
 
