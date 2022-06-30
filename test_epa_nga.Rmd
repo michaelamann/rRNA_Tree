@@ -4,7 +4,7 @@ author: "Michael Mann"
 date: '2022-06-15'
 output: html_document
 ---
-
+#### THIS WAS A BUST SKIPPING IT ###
 My first pass wiht the full tree had low support. 
 Going to try a few things:
 use EPA to place phylogenomic taxa onto AFTOL tree to make sure everything looks right. 
@@ -21,6 +21,14 @@ library(microseq)
 
 ```{r AFTOL tree}
 tree <- ape::read.tree("AFTOL/AFTOL_tree.tre")
+
+AFTOL_taxonomy <- 
+  read_csv("AFTOL/AFTOL_Taxonomy.csv") %>%
+  mutate(tip_name = paste0(AFTOL_ID, "_", Genus_Tip, "_", Species_Tip)) %>% # create name that matches tip
+  select(tip_name, superkingdom:species) %>%
+  mutate(tip_name = str_remove(tip_name, "GenBank_")) %>%
+  filter(phylum != "Microsporidia" | is.na(phylum))  # drop these
+
 ```
 
 
@@ -41,11 +49,10 @@ missing_seqs <-
   pull(Header)
 
 # create a tree that will work for raxml (dropped three tips)
-ape::write.tree(
-  ape::drop.tip(tree, tip = missing_seqs), file = "Test_Set/epa_ng/AFTOL_test/SSU/AFTOL_tree_SSU_epa_ng.tre")
+SSU_intermediate_tree <- ape::drop.tip(tree, tip = missing_seqs) 
 
-
-
+SSU_intermediate_tree$tip.label <- paste0("AFTOL_", SSU_intermediate_tree$tip.label)
+ape::write.tree(SSU_intermediate_tree,  file = "Test_Set/epa_ng/AFTOL_test/SSU/AFTOL_tree_SSU_epa_ng_AFTOL_Appended.tre")
 
 
 # create reference alignment 
@@ -67,6 +74,24 @@ SSU_Alignment %>%
   writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_reference.fasta")
 
 
+
+# creating taxonomy file for gappa
+SSU_AFTOL_seqs <- 
+  SSU_Alignment %>%
+  filter(str_detect(Header, pattern = "TBAS_", negate = TRUE) & 
+         str_detect(Header, pattern = "Phylogenomic_", negate = TRUE) &
+         str_detect(Header, pattern = "Agarico_", negate = TRUE)) %>%
+  mutate(presence_tree = case_when(Header %in% tree$tip.label ~ "Present", TRUE ~ "Missing")) %>%
+  filter(presence_tree == "Present") %>% # dropping some microsporidia
+  select(-presence_tree) %>%
+  pull(Header)
+
+AFTOL_taxonomy %>%
+  filter(tip_name %in% SSU_AFTOL_seqs) %>%
+  mutate(collapsed_tax = paste(superkingdom,  kingdom, phylum, class, order, family, genus, species, sep = ";")) %>%
+  select(tip_name, collapsed_tax) %>%
+  mutate(collapsed_tax = str_replace_all(collapsed_tax, pattern = " ", replacement = "_")) %>% # replace all spaces with underscores
+  write_tsv(file = "Test_Set/epa_ng/AFTOL_test/SSU/ssu_taxon_file.txt", col_names = FALSE)
 ```
 
 
@@ -103,14 +128,34 @@ LSU_Alignment %>%
 
 # create query
 LSU_Alignment %>%
-  filter(str_detect(Header, pattern = "TBAS", negate = TRUE) & 
-         str_detect(Header, pattern = "Phylogenomic", negate = TRUE) &
-         str_detect(Header, pattern = "Agarico", negate = TRUE)) %>%
+  filter(str_detect(Header, pattern = "TBAS_", negate = TRUE) & 
+         str_detect(Header, pattern = "Phylogenomic_", negate = TRUE) &
+         str_detect(Header, pattern = "Agarico_", negate = TRUE)) %>%
   mutate(presence_tree = case_when(Header %in% tree$tip.label ~ "Present", TRUE ~ "Missing")) %>%
   filter(presence_tree == "Present") %>% # dropping some microsporidia
   select(-presence_tree) %>%
   writeFasta("Test_Set/epa_ng/AFTOL_test/LSU/lsu_reference.fasta")
 
+
+
+
+# creating taxonomy file for gappa
+LSU_AFTOL_seqs <- 
+  LSU_Alignment %>%
+  filter(str_detect(Header, pattern = "TBAS_", negate = TRUE) & 
+         str_detect(Header, pattern = "Phylogenomic_", negate = TRUE) &
+         str_detect(Header, pattern = "Agarico_", negate = TRUE)) %>%
+  mutate(presence_tree = case_when(Header %in% tree$tip.label ~ "Present", TRUE ~ "Missing")) %>%
+  filter(presence_tree == "Present") %>% # dropping some microsporidia
+  select(-presence_tree) %>%
+  pull(Header)
+
+AFTOL_taxonomy %>%
+  filter(tip_name %in% LSU_AFTOL_seqs) %>%
+  mutate(collapsed_tax = paste(superkingdom,  kingdom, phylum, class, order, family, genus, species, sep = ";")) %>%
+  select(tip_name, collapsed_tax) %>%
+  mutate(collapsed_tax = str_replace_all(collapsed_tax, pattern = " ", replacement = "_")) %>% # replace all spaces with underscores
+  write_tsv(file = "Test_Set/epa_ng/AFTOL_test/LSU/lsu_taxon_file.txt", col_names = FALSE)
 ```
 
 
@@ -198,7 +243,28 @@ cd /users/mimann/xena-scratch/test_set/epa_ng/AFTOL/LSU
 epa-ng --ref-msa lsu_reference.fasta --tree AFTOL_tree_LSU_epa_ng.tre --query lsu_query.fasta --model GTR{0.9/3.3/1.4/0.8/7.4/1.0}+FC+G4m{0.5}+BU{1.0}
 ```
 
+SSU having trouble wiht epa-ng. Goign to parse the weighted alignment by hand
+at a loss none of this is working.... 
+```{r}
+weighted_alignment_ssu <- readFasta("Test_Set/epa_ng/AFTOL_test/SSU/T1.raxml.reduced.fasta")
 
 
+weighted_alignment_ssu %>%
+  filter(Header %in% SSU_AFTOL_seqs) %>%
+  mutate(Header = paste0("AFTOL_", Header)) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_reference_weighted_epa.fasta")
+
+
+weighted_alignment_ssu %>%
+  filter(!(Header %in% SSU_AFTOL_seqs)) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_query_weighted_epa.fasta")
+
+
+weighted_alignment_ssu %>%
+  filter(str_detect(Header, "Phylogenomic_")) %>%
+  writeFasta("Test_Set/epa_ng/AFTOL_test/SSU/ssu_query_weighted_epa_only_phylogenomic.fasta")
+
+
+```
 
 

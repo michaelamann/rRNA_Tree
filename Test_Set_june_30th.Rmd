@@ -1,0 +1,157 @@
+---
+title: "Test_set_june_30th"
+author: "Michael Mann"
+date: '2022-06-30'
+output: html_document
+---
+
+Goign to test out the alignment on T-BAS (to run epa-ng)
+
+
+
+```{r setup}
+library(microseq)
+library(tidyverse)
+```
+
+
+```{r read in data}
+
+SSU_alignment <- 
+  readFasta("Test_Set/MAFFT/test_set_18S_cleaned.fasta") %>%
+  rename(ssu = Sequence) 
+
+ssu_alignment_length <- SSU_alignment$ssu[[1]] %>% nchar()
+
+
+LSU_alignment <- readFasta("Test_Set/MAFFT/test_set_28S_cleaned.fasta") %>%
+  rename(lsu = Sequence)
+
+lsu_alignment_length <- LSU_alignment$lsu[[1]] %>% nchar()
+
+tree <- ape::read.tree("AFTOL/AFTOL_tree.tre")
+# dropping microsporidia from everything
+AFTOL_taxonomy <- 
+  read_csv("AFTOL/AFTOL_Taxonomy.csv") %>%
+  mutate(tip_name = paste0(AFTOL_ID, "_", Genus_Tip, "_", Species_Tip)) %>% # create name that matches tip
+  select(tip_name, superkingdom:species) %>%
+  mutate(tip_name = str_remove(tip_name, "GenBank_")) %>%
+  filter(phylum != "Microsporidia" | is.na(phylum))  # drop these
+
+
+```
+
+
+Create merged alignment
+```{r merge into one_alignment}
+
+alignment <- 
+  SSU_alignment %>%
+  full_join(LSU_alignment, by = "Header") %>%
+  replace_na( # replace all NAs with the length of the alignments so it works across the board
+      list(lsu = paste(rep("-", lsu_alignment_length), collapse = ""), 
+           ssu = paste(rep("-", ssu_alignment_length), collapse = ""))) %>%
+  mutate(Sequence = paste0(ssu, lsu)) %>%
+  select(Header, Sequence) %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1089_Antonospora_locustae")# drop microsporidia
+  
+# write alignments
+alignment %>%
+  writeFasta("Test_Set/test_set_june30/alignment_test_set_june_30.fasta")
+  
+# only writing phylogenomic and AFTOL to use for test
+alignment %>%
+  filter(str_detect(string = Header, pattern = "TBAS_", negate = TRUE) &
+         str_detect(string = Header, pattern = "Agarico_", negate = TRUE)   ) %>%
+  writeFasta("Test_Set/test_set_june30/alignment_Phylogenomic_AFTOL_test_set_june_30.fasta")
+
+# writing for raxml for TBAS
+alignment %>%
+  filter( str_detect(string = Header, pattern = "Agarico_", negate = TRUE)   ) %>%
+  writeFasta("Test_Set/test_set_june30/alignment_Phylogenomic_AFTOL_TBAS_test_set_june_30.fasta")
+  
+
+# writing for raxml for Agaricos
+alignment %>%
+  filter( str_detect(string = Header, pattern = "TBAS_", negate = TRUE)   ) %>%
+  writeFasta("Test_Set/test_set_june30/alignment_Phylogenomic_AFTOL_Agarico_test_set_june_30.fasta")
+
+
+# partitions
+paste0("SSU = ",  "1-", ssu_alignment_length, 
+       "  LSU = ", ssu_alignment_length+1, "-", ssu_alignment_length+lsu_alignment_length)
+
+
+
+```
+
+```{r make constraint tree AFTOL}
+missing_seqs <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(alignment, by = "Header") %>%
+  replace_na(list(Sequence = "missing")) %>%
+  filter(str_detect(string = Header, pattern = "Phylogenomic_", negate = T)) %>%
+  filter(Sequence == "missing") %>%
+  pull(Header)
+
+
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs), file = "Test_Set/test_set_june30/AFTOL_constraint_tree.tree")
+
+```
+
+partition file for each,
+```{bash}
+SSU, p1=1-16708
+LSU, p2=16709-31160
+```
+
+
+
+
+# GOING to do RAXML-ng using AFTOL as constraint tree and run just phylogenomic seqs on the tree. 
+
+```{bash raxml AFTOL}
+#!/bin/bash
+#SBATCH --ntasks=32
+#SBATCH --mem=0
+#SBATCH --time=1:00:00
+#SBATCH --job-name=raxml
+#SBATCH --partition=bigmem-1TB
+
+source activate raxml_ng_install
+
+cd /users/mimann/test_set_june_30th/AFTOL_constraint_test
+
+# checking for duplicates
+raxml-ng --parse --msa  alignment_Phylogenomic_AFTOL_test_set_june_30.fasta --model partition.part --prefix T1
+```
+
+
+
+raxml using aftol as constraint tree
+```{bash}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=raxml
+#SBATCH --partition=bigmem-3TB
+
+source activate raxml_ng_install
+
+cd /users/mimann/test_set_june_30th/AFTOL_constraint_test
+
+# run everything
+raxml-ng --all --msa T1.raxml.rba --threads 64 --outgroup Phylogenomic_Ichthyophonus_hoferi --model T1.raxml.reduced.partition --tree pars{10} --bs-trees 100 --tree-constraint AFTOL_constraint_tree.tre --bs-metric TBE  --prefix T2
+
+```
+
+
+# Then if that works, I will try to run the ascos as a separate run
+
+# then a run with the basidios
+
+
+# then a final run using all and epa-ng to place them on tips. 

@@ -43,7 +43,7 @@ test_set_taxonomy <- read_csv("/Users/michaelmann/Dropbox/Masters_Program/Genome
 
 ```
 
-
+Using epa-ng on TBAS to place taxa onto 
 ```{r merge and view}
 
 
