@@ -1,0 +1,135 @@
+---
+title: "Test_set_July_7th"
+author: "Michael Mann"
+date: '2022-07-07'
+output: html_document
+---
+I cleaned up the June 30th (see cleanup_notes_June_3th.txt) one after I looked at the tree. 
+now goign to run raxml-ng to get best model for everything. Then run epa-ng to place all taxa onto (individually) onto the phylogenomic tree. 
+going to use a lot of the same code but also use the cleaned alignments separatley for epa-ng. 
+
+
+
+```{r setup}
+library(microseq)
+library(tidyverse)
+```
+
+
+```{r read in data}
+
+SSU_alignment <- 
+  readFasta("Test_Set/MAFFT/test_set_18S_cleaned.fasta") %>%
+  rename(ssu = Sequence) 
+
+ssu_alignment_length <- SSU_alignment$ssu[[1]] %>% nchar()
+
+
+LSU_alignment <- readFasta("Test_Set/MAFFT/test_set_28S_cleaned.fasta") %>%
+  rename(lsu = Sequence)
+
+lsu_alignment_length <- LSU_alignment$lsu[[1]] %>% nchar()
+# using phylogenomic tree this time
+tree <- ape::read.nexus("1672taxa_29genes_bb1_1.nexus")
+# dropping microsporidia from everything
+AFTOL_taxonomy <- 
+  read_csv("AFTOL/AFTOL_Taxonomy.csv") %>%
+  mutate(tip_name = paste0(AFTOL_ID, "_", Genus_Tip, "_", Species_Tip)) %>% # create name that matches tip
+  select(tip_name, superkingdom:species) %>%
+  mutate(tip_name = str_remove(tip_name, "GenBank_")) %>%
+  filter(phylum != "Microsporidia" | is.na(phylum))  # drop these
+
+
+```
+
+
+Create merged alignment
+```{r merge into one_alignment}
+
+alignment <- 
+  SSU_alignment %>%
+  full_join(LSU_alignment, by = "Header") %>%
+  replace_na( # replace all NAs with the length of the alignments so it works across the board
+      list(lsu = paste(rep("-", lsu_alignment_length), collapse = ""), 
+           ssu = paste(rep("-", ssu_alignment_length), collapse = ""))) %>%
+  mutate(Sequence = paste0(ssu, lsu)) %>%
+  select(Header, Sequence) %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi")# drop microsporidia
+  
+# write alignments
+alignment %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_test_set_july_7th.fasta")
+  
+SSU_alignment %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi") %>% # drop microsporidia
+  rename(Sequence = ssu) %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_18S_test_set_july_7th.fasta")
+
+
+LSU_alignment %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi") %>% # drop microsporidia
+  rename(Sequence = lsu) %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_28S_test_set_july_7th.fasta")
+
+
+# partitions
+paste0("SSU = ",  "1-", ssu_alignment_length, 
+       "  LSU = ", ssu_alignment_length+1, "-", ssu_alignment_length+lsu_alignment_length)
+
+
+
+```
+
+```{r make constraint tree AFTOL}
+alignment_to_merge <- 
+  alignment %>%
+  filter(str_detect(Header, "Phylogenomic_")) %>% # want to make sure nothing from AFTOL is included here
+  mutate(Header = str_remove(Header, pattern = "Phylogenomic_")) 
+
+
+missing_seqs <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(alignment_to_merge, by = "Header") %>%
+  replace_na(list(Sequence = "missing")) %>%
+  filter(Sequence == "missing") %>%
+  pull(Header)
+
+
+tree$tip.label <- 
+  paste0("Phylogenomic_", tree$tip.label) %>%
+  str_replace_all(pattern = "'", replacement = "") %>% # some of the strain species names had extra symbols. I removed them.
+  str_replace_all(pattern = "-", replacement = "") # some of the strain species names had extra symbols. I removed them.
+
+
+  
+
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs), file = "Test_Set/test_set_July_7th/phylogenomic_constraint.tree")
+
+```
+
+partition file for each,
+```{bash}
+SSU, p1=1-16659 
+LSU, p2=16660-31111
+```
+
+running the model to get the parameters to run epa-ng. Going to run on wheler
+```{bash raxml model}
+#!/bin/bash
+#SBATCH --ntasks=8
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=raxml
+
+source activate raxml_ng_install
+
+cd /users/mimann/test_set_july_7th
+
+# checking for duplicates
+raxml-ng --parse --msa  alignment_test_set_july_7th.fasta --model partition.part --prefix T1
+
+# run everything
+raxml-ng --msa T1.raxml.rba --threads 64 --outgroup Phylogenomic_Ichthyophonus_hoferi --model T1.raxml.reduced.partition --tree pars{10}  --tree-constraint AFTOL_constraint_tree.tre --prefix T2
+```
