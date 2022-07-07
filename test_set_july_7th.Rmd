@@ -31,6 +31,13 @@ LSU_alignment <- readFasta("Test_Set/MAFFT/test_set_28S_cleaned.fasta") %>%
 lsu_alignment_length <- LSU_alignment$lsu[[1]] %>% nchar()
 # using phylogenomic tree this time
 tree <- ape::read.nexus("1672taxa_29genes_bb1_1.nexus")
+
+tree$tip.label <- 
+  paste0("Phylogenomic_", tree$tip.label) %>%
+  str_replace_all(pattern = "'", replacement = "") %>% # some of the strain species names had extra symbols. I removed them.
+  str_replace_all(pattern = "-", replacement = "") # some of the strain species names had extra symbols. I removed them.
+
+
 # dropping microsporidia from everything
 AFTOL_taxonomy <- 
   read_csv("AFTOL/AFTOL_Taxonomy.csv") %>%
@@ -80,28 +87,16 @@ paste0("SSU = ",  "1-", ssu_alignment_length,
 
 ```
 
-```{r make constraint tree AFTOL}
-alignment_to_merge <- 
-  alignment %>%
-  filter(str_detect(Header, "Phylogenomic_")) %>% # want to make sure nothing from AFTOL is included here
-  mutate(Header = str_remove(Header, pattern = "Phylogenomic_")) 
+```{r make constraint tree Phylogenomic tree}
 
-
+# exclude missings seqs from tree
 missing_seqs <- 
   tibble(Header = tree$tip.label) %>%
   mutate(source = "tree") %>%
-  full_join(alignment_to_merge, by = "Header") %>%
+  full_join(alignment, by = "Header") %>%
   replace_na(list(Sequence = "missing")) %>%
   filter(Sequence == "missing") %>%
   pull(Header)
-
-
-tree$tip.label <- 
-  paste0("Phylogenomic_", tree$tip.label) %>%
-  str_replace_all(pattern = "'", replacement = "") %>% # some of the strain species names had extra symbols. I removed them.
-  str_replace_all(pattern = "-", replacement = "") # some of the strain species names had extra symbols. I removed them.
-
-
   
 
 ape::write.tree(
