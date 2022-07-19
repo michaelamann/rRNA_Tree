@@ -128,3 +128,142 @@ raxml-ng --parse --msa  alignment_test_set_july_7th.fasta --model partition.part
 # run everything
 raxml-ng --msa T1.raxml.rba --threads 64 --outgroup Phylogenomic_Ichthyophonus_hoferi --model T1.raxml.reduced.partition --tree pars{10}  --tree-constraint AFTOL_constraint_tree.tre --prefix T2
 ```
+
+
+
+I have the model for both 18S and 28S genes. Now I need to drop tips that are only present in the other gene region so I can run the models separately.
+```{r create epa constraint trees}
+
+
+missing_seqs_SSU <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(SSU_alignment, by = "Header") %>%
+  replace_na(list(ssu = "missing")) %>%
+  filter(ssu == "missing") %>%
+  pull(Header)
+
+SSU_alignment %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi") %>% # drop microsporidia
+  filter(str_detect(Header, pattern = "Phylogenomic", negate = F)) %>%
+  rename(Sequence = ssu) %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_18S_test_set_july_7th_epa_reference.fasta")
+  
+
+SSU_alignment %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi") %>% # drop microsporidia
+  filter(str_detect(Header, pattern = "Phylogenomic", negate = T)) %>%
+  rename(Sequence = ssu) %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_18S_test_set_july_7th_epa_query.fasta")
+
+
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs_SSU), file = "Test_Set/test_set_July_7th/phylogenomic_constraint_SSU_epa.tree")
+
+
+
+
+
+
+### LSU ####
+
+
+LSU_alignment %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi") %>% # drop microsporidia
+  filter(str_detect(Header, pattern = "Phylogenomic", negate = T)) %>%
+  rename(Sequence = lsu) %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_28S_test_set_july_7th_epa_query.fasta")
+
+
+LSU_alignment %>%
+  filter(Header != "1089_Antonospora_locustae" &  Header != "1068_Encephalitozoon_cuniculi") %>% # drop microsporidia
+  filter(str_detect(Header, pattern = "Phylogenomic", negate = F)) %>%
+  rename(Sequence = lsu) %>%
+  writeFasta("Test_Set/test_set_July_7th/alignment_28S_test_set_july_7th_reference.fasta")
+
+missing_seqs_LSU <- 
+  tibble(Header = tree$tip.label) %>%
+  mutate(source = "tree") %>%
+  full_join(LSU_alignment, by = "Header") %>%
+  replace_na(list(lsu = "missing")) %>%
+  filter(lsu == "missing") %>%
+  pull(Header)
+  
+
+ape::write.tree(
+  ape::drop.tip(tree, tip = missing_seqs), file = "Test_Set/test_set_July_7th/phylogenomic_constraint_LSU_epa.tree")
+
+```
+
+
+Now going to run epa-ng for everything
+```{bash epa-ng model}
+#!/bin/bash
+#SBATCH --ntasks=64
+#SBATCH --mem=0
+#SBATCH --time=48:00:00
+#SBATCH --job-name=EPA-ng
+#SBATCH --partition=bigmem-3TB
+
+source activate epa-ng
+
+cd /users/mimann/test_set_july_7th
+
+### SSU epa
+epa-ng --ref-msa alignment_18S_test_set_july_7th_epa_reference.fasta --tree phylogenomic_constraint_SSU_epa.tree --query alignment_18S_test_set_july_7th_epa_query.fasta --model GTR{1.112611/3.411279/1.356869/0.786371/4.316321/1.000000}+FU{0.229863/0.234809/0.269224/0.266104}+IU{0.005329}+G4m{0.564659} --outdir epa_ssu
+
+### LSU epa
+epa-ng --ref-msa alignment_28S_test_set_july_7th_reference.fasta --tree phylogenomic_constraint_LSU_epa.tree --query alignment_28S_test_set_july_7th_epa_query.fasta --model GTR{1.188555/4.251181/1.648796/0.811689/7.216397/1.000000}+FU{0.229401/0.217851/0.290773/0.261974}+IU{0.042880}+G4m{0.564689} --outdir epa_lsu
+
+```
+
+
+```{r create taxonomy files for gappa}
+
+
+
+genome_taxonomy <-   
+  read_csv("genomes_metadata.csv")  %>%
+  mutate(tip_name = paste0("Phylogenomic_", old_taxonID_linked_genome_sequence)) %>%
+  mutate(tip_name = str_replace_all(tip_name, pattern = "'", replacement = "")) %>% # some of the strain species names had extra symbols. I removed them.
+  mutate(tip_name = str_replace_all(tip_name, pattern = "-", replacement = "")) %>% 
+  mutate(NCBI_Superkingdom = "Eukaryota") %>%
+  select(tip_name, NCBI_Superkingdom, NCBI_Kingdom, NCBI_Class, NCBI_Order, NCBI_Family, NCBI_Genus, NCBI_Species_Strain) %>%
+  replace_na(list(NCBI_Class = "", NCBI_Order = "", NCBI_Family = "", NCBI_Genus = "", NCBI_Species_Strain = "")) %>%
+  mutate(collapsed_tax = paste(NCBI_Superkingdom, NCBI_Kingdom, NCBI_Class, NCBI_Order, NCBI_Family, NCBI_Genus, NCBI_Species_Strain, sep = ";")) %>%
+  select(tip_name, collapsed_tax) 
+
+
+
+SSU_reference <- 
+  readFasta("Test_Set/test_set_July_7th/alignment_18S_test_set_july_7th_epa_reference.fasta") %>%
+  mutate(present = TRUE)
+
+LSU_reference <- 
+  readFasta("Test_Set/test_set_July_7th/alignment_28S_test_set_july_7th_reference.fasta") %>%
+  mutate(present = TRUE)
+
+genome_taxonomy %>%
+  full_join(SSU_reference, by = c("tip_name" = "Header")) %>%
+  filter(present == TRUE) %>%
+  mutate(collapsed_tax = str_replace_all(collapsed_tax, pattern = ";NA;", replacement = ";;")) %>%
+  filter(!(tip_name %in% missing_seqs_SSU)) %>%
+  select(tip_name, collapsed_tax) %>%
+  mutate(collapsed_tax = str_replace_all(collapsed_tax, pattern = " ", replacement = "_")) %>%  # replace all spaces with underscores
+  write_tsv(file = "Test_Set/test_set_July_7th/ssu_taxon_file_july_7th.txt", col_names = FALSE)
+
+
+
+genome_taxonomy %>%
+  full_join(LSU_reference, by = c("tip_name" = "Header")) %>%
+  filter(present == TRUE) %>%
+  mutate(collapsed_tax = str_replace_all(collapsed_tax, pattern = ";NA;", replacement = ";;")) %>%
+  filter(!(tip_name %in% missing_seqs_LSU)) %>%
+  select(tip_name, collapsed_tax) %>%
+  mutate(collapsed_tax = str_replace_all(collapsed_tax, pattern = " ", replacement = "_")) %>%  # replace all spaces with underscores
+  write_tsv(file = "Test_Set/test_set_July_7th/lsu_taxon_file_july_7th.txt", col_names = FALSE)
+
+
+
+
+```
